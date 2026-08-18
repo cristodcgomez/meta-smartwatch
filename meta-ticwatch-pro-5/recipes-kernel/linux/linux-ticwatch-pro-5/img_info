@@ -1,0 +1,12 @@
+kernel=%%KERNEL%%
+ramdisk=%%RAMDISK%%
+page_size=4096
+kernel_size=0x800000
+ramdisk_size=0x400000
+base_addr=0x80000000
+kernel_offset=0x00080000
+ramdisk_offset=0x08000000
+tags_offset=0x07e00000
+cmd_line='androidboot.hardware=dace console=ttyHSL0,115200,n8 androidboot.selinux=permissive androidboot.console=ttyHSL0 msm_rtb.filter=0x237 ehci-hcd.park=3 lpm_levels.sleep_disabled=1 earlycon=msm_hsl_uart,0x78af000 buildvariant=user audit=0'
+board="dace"
+format=gzip

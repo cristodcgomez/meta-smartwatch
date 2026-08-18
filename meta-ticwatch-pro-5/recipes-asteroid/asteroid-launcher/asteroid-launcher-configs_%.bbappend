@@ -1,0 +1,1 @@
+FILESEXTRAPATHS:prepend:ticwatch-pro-5 := "${THISDIR}/asteroid-launcher-configs:"
