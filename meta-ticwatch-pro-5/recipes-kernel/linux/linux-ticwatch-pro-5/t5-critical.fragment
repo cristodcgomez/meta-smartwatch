@@ -1,0 +1,187 @@
+# TicWatch Pro 5 (dace/monaco) config fragment — mergeado DESPUÉS de
+# monaco_GKI.config.
+#
+# ESTRATEGIA: NO forzamos los drivers del SoC a =y (los deja monaco_GKI.config
+# como =m). Qualcomm: los drivers resuelven muchos símbolos solo a nivel de
+# módulo (p.ej. ipc_log_string, iommu_logger_register, regulator_proxy...) —
+# forzarlos =y produce "ld.lld: undefined symbol" en vmlinux. Como hizo aurora
+# (aurora-boot-images.bb), los módulos .ko se empaquetan en vendor_boot.img +
+# init_boot.img y el kernel los carga en el primer boot.
+#
+# Aquí solo: fundamentos de placa necesarios de forma built-in SEGURA (sin
+# depender de símbolos de módulos) y ajustes de userspace/hybris.
+
+# --- usr/init: namespaces para LXC/hybris (mismo que aurora) ---
+CONFIG_SYSVIPC=y
+CONFIG_USER_NS=y
+CONFIG_PID_NS=y
+CONFIG_IPC_NS=y
+
+# --- Consola VT: DESACTIVADA (alinear con el stock GKI) ---
+# El stock NO tiene VT/VT_CONSOLE/DUMMY_CONSOLE/FB/HW_CONSOLE (=n). Con
+# VT_CONSOLE=y y console=tty0 en el cmdline pero SIN un framebuffer real
+# (el SDE DRM no esta listo tan pronto), el kernel puede colgar
+# inicializando la consola virtual ANTES de init -> logo estatico. Aurora
+# usa VT para psplash, pero aurora tiene el cont-splash-fb patch y un DT
+# con el nodo; nosotros no. Desactivamos VT para el boot de rescate (adb
+# no necesita consola local). psplash se resolvera despues con el DT
+# adecuado, como aurora.
+# CONFIG_VT is not set
+# CONFIG_VT_CONSOLE is not set
+# CONFIG_DUMMY_CONSOLE is not set
+# CONFIG_HW_CONSOLE is not set
+# CONFIG_FB is not set
+# CONFIG_DRM_FBDEV_EMULATION is not set
+
+# --- USB gadget core (built-in; el gadget lo arma adbd via configfs) ---
+# El DWC3 glue (dwc3-msm) va =m (módulo en vendor_boot). El core de gadget
+# y configfs van =y para que /sys/kernel/config/usb_gadget exista si el
+# módulo carga sin rootfs.
+CONFIG_USB_GADGET=y
+CONFIG_USB_CONFIGFS=y
+
+# --- eMMC: el sdhci-msm va =m; esto del subsistema de bloques queda =y ---
+CONFIG_MMC=y
+
+# --- Clocks/reguladores base del PMIC son =m; AppArmor va =y (hybris) ---
+CONFIG_SECURITY_APPARMOR=y
+CONFIG_SECURITY_APPARMOR_HASH=y
+CONFIG_DEFAULT_SECURITY_APPARMOR=y
+CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,integrity,apparmor,selinux,smack,tomoyo,bpf"
+
+# --- misc que el boot necesita sí o sí (built-in, sin símbolos de módulos) ---
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
+CONFIG_TMPFS=y
+CONFIG_FHANDLE=y
+CONFIG_UEVENT_HELPER=y
+
+# --- Decompresión de ramdisk: LZ4 (lo tiene el stock GKI) ---
+# El bootloader GKI concatena init_boot+vendor_boot ramdisks en el initrd;
+# el kernel debe poder descomprimir lz4 ademas de gzip. El stock tiene
+# CONFIG_RD_LZ4=y; sin el, si la cadena usa lz4 el init nunca arranca.
+CONFIG_RD_LZ4=y
+
+# --- DIAGNOSTICO de arranque (para ver el log del kernel colgado) ---
+# PSTORE_BLK: el kernel vuelca el kmsg a una particion eMMC (cache) que
+# leemos luego con fastboot. Es la unica via de log sin UART. Ademas
+# panic=10 (cmdline) fuerza reboot tras panic para que el log se escriba.
+CONFIG_PSTORE_BLK=y
+CONFIG_PSTORE_ZONE=y
+CONFIG_PSTORE_BLK_KMSG_SIZE=256
+# earlycon + consola GENI (ttyMSM0) built-in para log temprano
+CONFIG_SERIAL_EARLYCON=y
+CONFIG_SERIAL_QCOM_GENI=y
+CONFIG_SERIAL_QCOM_GENI_CONSOLE=y
+
+# /dev/mem para que el init (userspace) pinte el VERDE en el framebuffer
+# cont-splash @0x5c000000 via dd (debug del boot-color; quitar en produccion).
+CONFIG_DEVMEM=y
+# CONFIG_STRICT_DEVMEM is not set
+# CONFIG_IO_STRICT_DEVMEM is not set
+
+# --- BATERÍA/PMIC: apagar los que requieren gvotable.h (out-of-tree) ---
+# drivers/power/supply/qcom/{pmic-voter-compat,smblite}.c incluyen
+# <misc/gvotable.h> que vive en google-modules/bms (out-of-tree, como
+# linux-aurora-modules). No los compilamos aqui; el fragment de aurora los
+# apaga por lo mismo.
+# CONFIG_QCOM_POWER_SUPPLY is not set
+# CONFIG_QPNP_SMBLITE is not set
+
+# --- DTUBS: NO panickear ante oops (debug) ---
+# El gki_defconfig pone CONFIG_PANIC_ON_OOPS=y; ante el primer oops de un
+driver del SoC (por deps =m), el kernel panickea y el ABL se pone en
+bucle/recovery. Para el primer arranque de rescate lo apagamos.
+# CONFIG_PANIC_ON_OOPS is not set
+# CONFIG_PANIC_ON_OOPS_VALUE is not set
+# CONFIG_QTI_QBG is not set
+
+# --- Crypto/hwkm/secure: DEJADOS =m (como el stock) ---
+# Antes los apagabamos creyendo que no eran deps de adb. ERROR: el stock
+# carga crypto-qti-common/hwkm_v1/crypto-qti-hwkm/secure_buffer en el
+# vendor ramdisk y el SoC monaco los NECESITA para inicializar TrustZone/
+# clocks/power antes de llegar a userspace. Sin ellos el kernel hace el
+# handshake (logo) pero muere antes de exec init (sin vibraciones).
+# Van =m (los pone monaco_GKI.config): modpost los resuelve sin romper
+# el link de vmlinux. NO los apagamos.
+
+# --- Apagar usb_f_qdss (duplica dwc3_msm_* con el core built-in) ---
+# usb_f_qdss=m exporta dwc3_msm_notify_event/msm_ep_* que ya vienen
+# built-in via CONFIG_USB_DWC3 (core). Duplicado en ld.lld; no lo
+# necesitamos para adb de rescate.
+# CONFIG_USB_F_QDSS is not set
+
+# --- Handshake boot + cadena de arranque temprano del SoC: =y (BUILT-IN) ---
+# El kernel 5.4 REAL del dace (mobvoi-ticwatch-kernel, monaco.config) tiene
+# TODA la cadena de init del SoC built-in (=y), NO como modulos. Nosotros la
+# dejabamos =m siguiendo el GKI 5.15 de aurora, pero el dace la necesita
+# built-in para inicializar el SoC durante el arranque temprano (clocks,
+# smem, TrustZone, iommu, glink) ANTES de init. Con ellos =m, el kernel se
+# cuelga en head.S/arranque temprano (logo congelado, sin ROJO) porque no
+# puede hablar con el hardware. Cadena =y del monaco.config (5.4):
+CONFIG_QCOM_SMEM=y
+CONFIG_QCOM_SOC_SLEEP_STATS=y
+CONFIG_MSM_BOOT_STATS=y
+CONFIG_MSM_BOOT_TIME_MARKER=y
+CONFIG_IPC_LOGGING=y
+CONFIG_QCOM_SCM=y
+CONFIG_QCOM_SECURE_BUFFER=y
+CONFIG_QCOM_MPM=y
+CONFIG_QCOM_SMP2P=y
+CONFIG_QCOM_SMP2P_SLEEPSTATE=y
+CONFIG_QCOM_GLINK=y
+CONFIG_QCOM_RPMH=y
+CONFIG_QCOM_CLK_RPMH=y
+CONFIG_PINCTRL_MSM=y
+CONFIG_PINCTRL_MONACO=y
+CONFIG_ARM_SMMU=y
+CONFIG_QTI_IOMMU_SUPPORT=y
+CONFIG_REGULATOR_PROXY_CONSUMER=y
+CONFIG_SERIAL_MSM_GENI=y
+CONFIG_RPMSG_QCOM_GLINK_SLATECOM=y
+# Providers de los simbolos que el link pide (slatecom_*, qcom_*_io_pgtable,
+# fast_smmu_*): MSM_SLATECOM provee slatecom_*; QCOM_IOMMU_UTIL +
+# IOMMU_IO_PGTABLE_FAST/LPAE proveen los qcom_*_io_pgtable/fast_smmu del
+# arm-smmu built-in. MSM_SLATECOM_INTERFACE/RPMSG NO van =y: son para
+# userspace/control de slate y llaman a qcom_register_ssr_notifier (que
+# requeriria QCOM_RPROC_COMMON=y, que olddefconfig revierte a =m).
+# No los necesitamos para adb.
+CONFIG_MSM_SLATECOM=y
+CONFIG_MSM_SLATECOM_INTERFACE=y
+CONFIG_MSM_SLATECOM_RPMSG=y
+CONFIG_QCOM_IOMMU_UTIL=y
+CONFIG_IOMMU_IO_PGTABLE_FAST=y
+CONFIG_IOMMU_IO_PGTABLE_LPAE=y
+# Providers de qseecom_* (slatecom_interface). QSEECOM_PROXY=y es seguro.
+CONFIG_QSEECOM_PROXY=y
+CONFIG_QCOM_RPROC_COMMON=y
+
+# --- USB core: dwc3-msm y su cadena van =m (los pone monaco_GKI.config) ---
+# dwc3-msm/phy =y fue error (scm/shmbridge/crypto/mpm rompen el link).
+# Dejados =m como el stock; el init los cargará como módulos en su
+# ramdisk de rescate. NO los apagamos aqui: este fragment se mergea
+# DESPUES de monaco_GKI.config y un "is not set" anularia el =m (eso
+# dejo el build sin dwc3-msm.ko -> sin UDC -> sin adb).
+# MMC_CRYPTO tambien =m (el stock lo carga; lo necesita el subsistema
+# de almacenamiento seguro).
+
+# --- proxy-consumer: DEJADO =m (como el stock) ---
+# Lo apagamos siguiendo a aurora (que lo apaga porque gcc-monaco rompia
+# en SU hardware/build). Pero el STOCK del dace carga proxy-consumer.ko
+# en modules.load y gcc-monaco funciona. El "bootloop" que veiamos NO
+# era proxy-consumer: era la ausencia de dwc3-msm.ko (config roto) y,
+# sobre todo, la falta de la cadena crypto/hwkm/secure que impedia llegar
+# a userspace. Restaurado =m para replicar el stock (260 modulos).
+# CONFIG_REGULATOR_PROXY_CONSUMER_LEGACY is not set
+
+# --- SLATE/SEB: HABILITADOS =m (el dace los NECESITA) ---
+# ERROR previo: copiamos de aurora el apagado de los drivers slate/seb/rproc
+# porque aurora (Pixel Watch 2) NO tiene segunda pantalla. Pero el dace SI
+# tiene slate (pantalla secundaria / modo esencial) y el dtbo que el ABL
+# aplica sobre el DTB base AÑADE nodos qcom,slate-*/qcom,glink-slatecom-*.
+# Con los drivers apagados, el DT resultante referencia drivers que no
+# existen -> DT inconsistente -> head.S se cuelga ANTES de cualquier
+# output (logo congelado, sin ROJO). Confimado: quitar el dtbo cae a EDL
+# (el ABL lo necesita), y con el dtbo stock el kernel se cuelga (drivers
+# slate ausentes). Habilitamos los drivers slate/seb =m (los pone
+# monaco_GKI.config; NO los apagamos aqui).
