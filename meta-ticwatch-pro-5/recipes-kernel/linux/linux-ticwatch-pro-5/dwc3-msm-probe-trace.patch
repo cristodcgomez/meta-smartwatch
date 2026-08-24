@@ -1,0 +1,107 @@
+From: TicWatch Pro 5 port
+Subject: [PATCH] usb: dwc3: dwc3-msm: trace probe steps via /sys/kernel/dace_glue
+
+Instrumentación de bring-up: registra en qué paso de dwc3_msm_probe se
+queda el glue (0 = probe nunca llamado; 1..7 pasos; bit4 = salió por err,
+con el errno en dace_glue_ret). Expuesto en /sys/kernel/dace_glue para
+telemetría por barcode sin UART. Sin cambios funcionales.
+
+Upstream-Status: Inappropriate [dace bring-up]
+---
+ drivers/usb/dwc3/dwc3-msm-core.c | 60 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 60 insertions(+)
+
+--- a/drivers/usb/dwc3/dwc3-msm-core.c
++++ b/drivers/usb/dwc3/dwc3-msm-core.c
+@@ -5596,6 +5596,26 @@
+ 	return ret;
+ }
+ 
++
++/* dace trace: paso actual del probe del glue (0 = nunca llamado) */
++int dace_glue_step = 0;
++int dace_glue_ret = 0;
++
++#include <linux/sysfs.h>
++#include <linux/kobject.h>
++static ssize_t dace_glue_show(struct kobject *k, struct kobj_attribute *a,
++			      char *buf)
++{
++	return sprintf(buf, "%d %d\n", dace_glue_step, dace_glue_ret);
++}
++static struct kobj_attribute dace_glue_attr =
++	__ATTR(dace_glue, 0444, dace_glue_show, NULL);
++static int __init dace_glue_sysfs_init(void)
++{
++	return sysfs_create_file(kernel_kobj, &dace_glue_attr.attr);
++}
++late_initcall(dace_glue_sysfs_init);
++
+ static int dwc3_msm_probe(struct platform_device *pdev)
+ {
+ 	struct device_node *node = pdev->dev.of_node, *dwc3_node, *phy_node;
+@@ -5606,6 +5626,7 @@
+ 	u32 val;
+ 
+ 	mdwc = devm_kzalloc(&pdev->dev, sizeof(*mdwc), GFP_KERNEL);
++	dace_glue_step = 1;
+ 	if (!mdwc)
+ 		return -ENOMEM;
+ 
+@@ -5724,6 +5745,7 @@
+ 							"ahb2phy_base");
+ 	if (res) {
+ 		mdwc->ahb2phy_base = devm_ioremap(&pdev->dev,
++	dace_glue_step = 2;
+ 					res->start, resource_size(res));
+ 		if (IS_ERR_OR_NULL(mdwc->ahb2phy_base)) {
+ 			dev_err(dev, "couldn't find ahb2phy_base addr.\n");
+@@ -5829,6 +5851,7 @@
+ 		ret = PTR_ERR(mdwc->hs_phy);
+ 		goto err;
+ 	}
++	dace_glue_step = 3;
+ 
+ 	phy_node = of_parse_phandle(dwc3_node, "usb-phy", 1);
+ 	mdwc->ss_phy = devm_usb_get_phy_by_node(mdwc->dev, phy_node, NULL);
+@@ -5837,6 +5860,7 @@
+ 		ret = PTR_ERR(mdwc->ss_phy);
+ 		goto err;
+ 	}
++	dace_glue_step = 4;
+ 
+ 	/* use default as nominal bus voting */
+ 	mdwc->default_bus_vote = BUS_VOTE_NOMINAL;
+@@ -5890,6 +5914,7 @@
+ 
+ 		role_desc.fwnode = dev_fwnode(&pdev->dev);
+ 		mdwc->role_switch = usb_role_switch_register(mdwc->dev,
++	dace_glue_step = 5;
+ 								&role_desc);
+ 		if (IS_ERR(mdwc->role_switch)) {
+ 			ret = PTR_ERR(mdwc->role_switch);
+@@ -5901,6 +5926,7 @@
+ 		ret = dwc3_msm_extcon_register(mdwc);
+ 		if (ret)
+ 			goto put_dwc3;
++	dace_glue_step = 6;
+ 
+ 		/*
+ 		 * dpdm regulator will be turned on to perform apsd
+@@ -5964,6 +5990,7 @@
+ 	if (of_property_read_bool(node, "qcom,msm-probe-core-init"))
+ 		dwc3_ext_event_notify(mdwc);
+ 
++	dace_glue_step = 7;
+ 	return 0;
+ 
+ put_dwc3:
+@@ -5972,6 +5999,8 @@
+ 		icc_put(mdwc->icc_paths[i]);
+ 
+ err:
++	dace_glue_step |= 0x10;
++	dace_glue_ret = ret;
+ 	destroy_workqueue(mdwc->sm_usb_wq);
+ 	destroy_workqueue(mdwc->dwc3_wq);
+ 	usb_put_redriver(mdwc->redriver);

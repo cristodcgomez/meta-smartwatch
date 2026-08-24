@@ -25,6 +25,9 @@ COMPATIBLE_MACHINE = "ticwatch-pro-5"
 # ═══════════════════════════════════════════════════════════════════════════
 SRC_URI = "git:///home/cristo/TICWATCH/google-eos-kernel;branch=halium-13.0;protocol=file \
            file://t5-critical.fragment \
+           file://eud-secure-fail-nonfatal.patch \
+           file://dwc3-msm-skip-deferred-extcon.patch \
+           file://dwc3-msm-probe-trace.patch \
            file://monaco-real.dtb \
            file://monacop.dtb \
            file://vendor-bootconfig \

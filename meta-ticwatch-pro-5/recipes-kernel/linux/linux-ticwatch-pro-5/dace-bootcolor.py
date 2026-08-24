@@ -60,9 +60,65 @@ static ssize_t dace_color_store(struct kobject *k, struct kobj_attribute *a,
 }
 static struct kobj_attribute dace_color_attr =
 	__ATTR(dace_color, 0200, NULL, dace_color_store);
+
+/* Barcode de diagnóstico USB: pitch 466 (panel RM69090 466x466, calibrado
+ * en v24). 8 franjas verticales: BLANCA=1, ROJA=0, franja 1 = izquierda,
+ * con separadores NEGROS de 4px entre franjas para leer límites sin
+ * ambigüedad. Si el buffer contiene "XXXXXXXX YYYYYYYY" (espacio), la mitad
+ * superior pinta el primer grupo y la inferior el segundo. */
+static void dace_paint_half(u32 *fb, int r0, int r1, const char *bits)
+{
+	const int P = 466, W = P / 8;
+	int r, s, i;
+
+	for (r = r0; r < r1; r++) {
+		u32 *row = fb + r * P;
+
+		for (s = 0; s < 8; s++) {
+			u32 c = (bits[s] == '1') ? 0x00ffffff : 0x00ff0000;
+
+			for (i = 0; i < W - 4; i++)
+				row[s * W + i] = c;
+			for (; i < W; i++)
+				row[s * W + i] = 0;	 /* separador negro */
+		}
+	}
+}
+
+static void dace_barcode(const char *bits)
+{
+	u32 *fb = (u32 *)phys_to_virt((phys_addr_t)DACE_SPLASH_PHYS);
+	const char *spc;
+	int i;
+
+	if (!fb)
+		return;
+	for (i = 0; i < DACE_FB_NPIX; i++)
+		fb[i] = 0;					 /* fondo negro */
+	spc = strchr(bits, ' ');
+	if (spc && strlen(spc + 1) >= 8)
+		dace_paint_half(fb, 233, 466, spc + 1);
+	dace_paint_half(fb, 0, spc ? 233 : 466, bits);
+	dsb(sy);
+}
+
+static ssize_t dace_barcode_store(struct kobject *k, struct kobj_attribute *a,
+				  const char *buf, size_t n)
+{
+	char bits[18] = {0};
+	size_t len = n < 17 ? n : 17;
+
+	memcpy(bits, buf, len);
+	dace_barcode(bits);
+	return n;
+}
+static struct kobj_attribute dace_barcode_attr =
+	__ATTR(dace_barcode, 0200, NULL, dace_barcode_store);
+
 static int __init dace_color_init(void)
 {
-	return sysfs_create_file(kernel_kobj, &dace_color_attr.attr);
+	sysfs_create_file(kernel_kobj, &dace_color_attr.attr);
+	return sysfs_create_file(kernel_kobj, &dace_barcode_attr.attr);
 }
 late_initcall(dace_color_init);
 
