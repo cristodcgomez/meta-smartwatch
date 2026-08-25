@@ -113,6 +113,14 @@ do_configure:append() {
     sed -i "/^CONFIG_USB_F_QDSS=/d; /^CONFIG_USB_CONFIGFS_F_QDSS=/d" ${B}/.config
     echo '# CONFIG_USB_F_QDSS is not set' >> ${B}/.config
     echo '# CONFIG_USB_CONFIGFS_F_QDSS is not set' >> ${B}/.config
+    # v43: PROXY_CONSUMER OFF (fix USB de aurora, mismo SoC): con él activo el
+    # probe de gdsc-regulator hace regulator_get sobre reguladores RPM que en
+    # un first-stage-only nunca llegan → defer -517 permanente → USB3_GDSC
+    # jamás se registra → dwc3_msm_probe difiere -517 → sin UDC/adb.
+    # (verificado v39-v42: step=17 ret=-517; aurora lo documenta igual).
+    sed -i "/^CONFIG_REGULATOR_PROXY_CONSUMER=/d" ${B}/.config
+    echo '# CONFIG_REGULATOR_PROXY_CONSUMER is not set' >> ${B}/.config
+    echo '# CONFIG_REGULATOR_PROXY_CONSUMER_LEGACY is not set' >> ${B}/.config
     # v14: FORZAR =y la cadena de arranque temprano del SoC (el olddefconfig
     # los revierte a =m porque son tristate seleccionados por otros =m).
     # Son los que el kernel 5.4 del dace tiene built-in. Sin ellos =y el
@@ -121,7 +129,7 @@ do_configure:append() {
                IPC_LOGGING QCOM_SCM QCOM_SECURE_BUFFER QCOM_MPM QCOM_SMP2P \
                QCOM_SMP2P_SLEEPSTATE QCOM_GLINK QCOM_RPMH QCOM_CLK_RPMH \
                PINCTRL_MSM PINCTRL_MONACO ARM_SMMU ARM_SMMU_QCOM QTI_IOMMU_SUPPORT \
-               REGULATOR_PROXY_CONSUMER SERIAL_MSM_GENI RPMSG_QCOM_GLINK_SLATECOM \
+               SERIAL_MSM_GENI RPMSG_QCOM_GLINK_SLATECOM \
                MSM_SLATECOM MSM_SLATECOM_INTERFACE MSM_SLATECOM_RPMSG \
                QCOM_IOMMU_UTIL IOMMU_IO_PGTABLE_FAST IOMMU_IO_PGTABLE_LPAE \
                QSEECOM_PROXY QCOM_RPROC_COMMON QCOM_Q6V5_PAS; do
@@ -274,7 +282,7 @@ do_deploy:append() {
         --ramdisk_offset 0x01000000 \
         --tags_offset 0x00000100 \
         --dtb_offset 0x01f00000 \
-        --vendor_cmdline 'lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=noforce kpti=off cgroup.memory=nokmem,nosocket loop.max_part=7 bootconfig qcom_geni_serial.con_enabled=0 androidboot.hardware=dace bootconfig buildvariant=user'
+        --vendor_cmdline 'lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=noforce kpti=off cgroup.memory=nokmem,nosocket loop.max_part=7 bootconfig qcom_geni_serial.con_enabled=0 androidboot.hardware=dace bootconfig buildvariant=user fw_devlink=permissive'
     bbnote "vendor_boot.img (v4, base 0 + cmdline stock + blob 2-dtb) generado: $(stat -c%s ${DEPLOYDIR}/${DISTRO}-${MACHINE}-vendor_boot.img) bytes"
 
     # ── (3) init_boot.img: nuestro initramfs (init de adb) como ramdisk v4 ──

@@ -1,0 +1,32 @@
+From: TicWatch Pro 5 port
+Subject: [PATCH] clk: qcom: gdsc-regulator: skip parent-supply coupling (dace)
+
+Bring-up: en un boot first-stage-only los reguladores RPM (parent-supply
+del GDSC, p.ej. VDD_CX) pueden no registrarse nunca, y el acople hace que
+el GDSC difiera -517 permanentemente. Sin USB3_GDSC, dwc3_msm_probe difiere
+y no hay UDC/adb. Se desacopla el supply del parent; el GDSC queda
+operativo (el rail CX del SoC ya está activo).
+
+Upstream-Status: Inappropriate [dace bring-up]
+---
+ drivers/clk/qcom/gdsc-regulator.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+--- a/drivers/clk/qcom/gdsc-regulator.c
++++ b/drivers/clk/qcom/gdsc-regulator.c
+@@ -741,8 +741,14 @@
+ 	if (*init_data == NULL)
+ 		return -ENOMEM;
+ 
++	/* dace bring-up: NO acoplar el GDSC a su parent-supply (regulador
++	 * RPM, p.ej. VDD_CX). En un boot first-stage-only los reguladores RPM
++	 * pueden no llegar nunca, y el acople hace que el registro/uso del
++	 * GDSC difiera -517 para siempre -> USB3_GDSC nunca existe ->
++	 * dwc3_msm_probe difiere -> sin UDC/adb. El GDSC funciona sin el
++	 * voto del parent (el rail CX del SoC ya esta activo). */
+ 	if (of_get_property(dev->of_node, "parent-supply", NULL))
+-		(*init_data)->supply_regulator = "parent";
++		(*init_data)->supply_regulator = NULL;
+ 
+ 	ret = of_property_read_string(dev->of_node, "regulator-name",
+ 					&sc->rdesc.name);

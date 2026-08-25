@@ -105,6 +105,7 @@ info "dace-init: cmdline = $CMDLINE"
 stage 1 "init-start"
 
 info "dace-init: loading kernel modules (FIRST-STAGE stock: los 67 que el init ELF carga) ..."
+MODOUT="none"; MODRC=-1
 KREL=$(uname -r)
 # La cadena EXACTA del modules.load del vendor_boot stock. El init binario
 # de Android first-stage los carga EN ESTE ORDEN para que el SoC llegue a
@@ -126,14 +127,18 @@ if [ -d /lib/modules ]; then
     modprobe google-extcon-usb-shim usb_force_disable_boot=0 2>/dev/kmsg && \
         info "dace-init: usb_shim + usb_force_disable_boot=0" || \
         info "dace-init: usb_shim FAILED/no-op"
-    info "dace-init: cargando cadena first-stage COMPLETA (modules.load stock, 178 mods)..."
+    info "dace-init: cargando cadena first-stage (modules.load; 2 pasadas por dependencias)..."
     NMODS=0
-    while read -r m; do
-        case "$m" in ''|\#*) continue ;; esac
-        modprobe "${m%.ko}" 2>/dev/kmsg || info "dace-init: modprobe $m FAILED"
-        NMODS=$((NMODS+1))
-    done < /lib/modules/modules.load
-    info "dace-init: $NMODS módulos first-stage cargados en orden stock"
+    for PASS in 1 2; do
+        while read -r m; do
+            case "$m" in ''|\#*) continue ;; esac
+            [ -d "/sys/module/${m%.ko}" ] && continue   # ya cargado
+            modprobe "${m%.ko}" 2>/dev/kmsg || \
+                info "dace-init: pass$PASS modprobe $m FAILED"
+            NMODS=$((NMODS+1))
+        done < /lib/modules/modules.load
+    done
+    info "dace-init: $NMODS intentos de carga first-stage completados"
     # EUD: su extcon (EXTCON_USB=true, spoof de attach) es lo que lleva al
     # glue dwc3-msm a modo peripheral y registra el UDC. Ya viene en
     # modules.load; el parche eud-secure-fail-nonfatal evita que el rechazo
@@ -142,6 +147,18 @@ if [ -d /lib/modules ]; then
     EUD_OK=0
     [ -d /sys/module/eud ] && EUD_OK=1
     info "dace-init: eud cargado → EUD_OK=$EUD_OK"
+    # Glue dwc3-msm explícito (2ª pasada por si gdsc-regulator/clk-qcom se
+    # cargaron después en el orden alfabético de modules.load):
+    if [ ! -d /sys/module/dwc3-msm ]; then
+        MODOUT=$(modprobe dwc3-msm 2>&1)
+        MODRC=$?
+        info "dace-init: modprobe dwc3-msm rc=$MODRC out='$MODOUT'"
+        [ -n "$MODOUT" ] && printf '%s\n' "$MODOUT" > /dev/kmsg
+    else
+        MODOUT="already-loaded"; MODRC=0
+        info "dace-init: dwc3-msm ya estaba cargado"
+    fi
+    sleep 2   # dejar correr el deferred-probe workqueue
     # Belt-and-braces: abrir la puerta USB por si el shim la anclo via DT
     for fd in /sys/devices/platform/soc/soc:extcon_usb_shim/force_disable \
               /sys/bus/platform/devices/soc:extcon_usb_shim/force_disable; do
@@ -239,10 +256,17 @@ info "dace-init: partitions: $(cat /proc/partitions 2>/dev/null | tr '\n' ' ')"
 info "dace-init: DEBUG-PURO — NO switch_root; quedando en initramfs con adb"
 
 # ── CÓDIGO DE BARRAS de diagnóstico USB (pantalla final) ──
-# 8 franjas verticales de 80px: BLANCA=OK, NEGRA=fallo.
-# Orden: 1=modprobe eud | 2=driver msm-eud bound | 3=extcon existe |
-#        4=driver msm-dwc3 bound | 5=driver dwc3 bound | 6=UDC existe |
-#        7=dmesg menciona dwc3 | 8=gadget configfs adb creado
+# Dos RONDAS alternas (8s cada una): elijo cuál veo por la franja superior.
+# RONDA 1 (arriba F): 1=modprobe eud | 2=módulo eud | 3=msm-eud bound |
+#   4=msm-dwc3 bound | 5=dwc3 bound | 6=UDC | 7=dmesg dwc3 | 8=extcon
+# RONDA 1 (abajo B): 1=/sys/module/dwc3-msm | 2=/sys/kernel/dace_glue |
+#   3-5=step bits 2,1,0 | 6=bit err(step&16) | 7=INIT falló(step&32) | 8=módulo descargado(step&64)
+# RONDA 2 (arriba C): 1=dir driver msm-dwc3 existe | 2=device hsusb existe |
+#   3=modprobe rc=0 | 4=MODOUT 'Unknown symbol' | 5=MODOUT 'disagrees' |
+#   6=MODOUT 'exists' | 7=MODOUT vacío/silencioso | 8=dmesg msm-dwc3
+# RONDA 2 (abajo D): 1=dmesg 'already registered' | 2=dmesg 'Unable to handle' |
+#   3=dmesg 'Call trace' | 4=dmesg 'disagrees about version' |
+#   5=dmesg 'Unknown symbol' | 6=nº módulos cargados >=170 | 7=/lib/modules existe | 8=1 (marca de ronda)
 F1=${EUD_OK:-0}
 # hechos SIN AMBIGÜEDAD:
 # 2 = módulo eud cargado | 3 = msm-eud con device bound | 4 = msm-dwc3 bound
@@ -264,21 +288,19 @@ F6=0; for f in /sys/class/udc/*; do [ -e "$f" ] && F6=1; done
 dmesg 2>/dev/null | grep -qi "dwc3" && F7=1 || F7=0
 F8=0; for f in /sys/class/extcon/extcon*; do [ -e "$f" ] && F8=1; done
 info "dace-init: BARCODE F1..F8 = $F1 $F2 $F3 $F4 $F5 $F6 $F7 $F8"
-# ── Barcode B v33: paso del probe del glue (/sys/kernel/dace_glue) ──
-# step: 0=probe nunca llamado | 1=murió en clk/gdsc | 2=ahb2phy→hs_phy |
-# 3=hs_phy OK→ss_phy | 4=ss_phy OK→role_switch | 5=→extcon | 6=→post-extcon |
-# 7=probe COMPLETO | bit4(+16)=salió por err, ret=errno (-517=defer)
-GLUE_STEP=0; GLUE_RET=0
-[ -e /sys/kernel/dace_glue ] && read -r GLUE_STEP GLUE_RET < /sys/kernel/dace_glue 2>/dev/null
-info "dace-init: GLUE step=$GLUE_STEP ret=$GLUE_RET"
-CODE2=""
-i=7
-while [ $i -ge 0 ]; do
-    CODE2="$CODE2$(( (GLUE_STEP >> i) & 1 ))"
-    i=$((i-1))
-done
-info "dace-init: BARCODE2 (binario de step $GLUE_STEP) = $CODE2"
-info "dace-init: BARCODE2 B1..B8 = $B1 $B2 $B3 $B4 $B5 $B6 $B7 $B8"
+# ── Barcode B v36: estado del glue dwc3-msm ──
+# B1=módulo dwc3-msm cargado | B2=/sys/kernel/dace_glue existe |
+# B3-B5=step bits 2,1,0 | B6=bit err (step&16) | B7=INIT FALLÓ (step&32) |
+# B8=módulo descargado/exit (step&64)
+GLUE_STEP=0; GLUE_RET=0; MOD=0; SYSFS=0
+[ -d /sys/module/dwc3-msm ] && MOD=1
+if [ -e /sys/kernel/dace_glue ]; then
+    SYSFS=1
+    read -r GLUE_STEP GLUE_RET < /sys/kernel/dace_glue 2>/dev/null
+fi
+info "dace-init: GLUE mod=$MOD sysfs=$SYSFS step=$GLUE_STEP ret=$GLUE_RET"
+CODE2="$MOD$SYSFS$(( (GLUE_STEP >> 2) & 1 ))$(( (GLUE_STEP >> 1) & 1 ))$(( GLUE_STEP & 1 ))$(( (GLUE_STEP >> 4) & 1 ))$(( (GLUE_STEP >> 5) & 1 ))$(( (GLUE_STEP >> 6) & 1 ))"
+info "dace-init: BARCODE2 = $CODE2"
 # dmesg completo a console (→ console-ramoops) y a pmsg (→ pstore pmsg-ramoons)
 dmesg 2>/dev/null > /dev/console 2>/dev/null || true
 dmesg 2>/dev/null > /dev/pmsg0 2>/dev/null || true
@@ -293,7 +315,6 @@ sleep 3
 #   GRIS OSCURO 1s = hecho FALLO, con 0.5s de negro entre pulsos;
 #   MORADO 2s = fin. Se repite en bucle.
 CODE="$F1$F2$F3$F4$F5$F6$F7$F8"
-CODE2="$B1$B2$B3$B4$B5$B6$B7$B8"
 BARCODE_OK=0
 if [ -e /sys/kernel/dace_barcode ]; then
     if echo "$CODE $CODE2" > /sys/kernel/dace_barcode 2>/dev/null; then
@@ -306,6 +327,72 @@ if [ -e /sys/kernel/dace_barcode ]; then
 else
     info "dace-init: sin /sys/kernel/dace_barcode — MORADO"
     [ -e /sys/kernel/dace_color ] && echo 0x00aa00aa > /sys/kernel/dace_color
+fi
+# ── PÁGINAS DE TEXTO (rotan con los barcodes en el bucle final) ──
+REGNAMES=""
+for rn in /sys/class/regulator/regulator*/name; do
+    [ -e "$rn" ] && REGNAMES="$REGNAMES $(cat "$rn" 2>/dev/null)"
+done
+GDSCLIST=$(ls /sys/bus/platform/drivers/gdsc 2>/dev/null | tr '\n' ' ')
+PMICLIST=$(ls /sys/bus/spmi/drivers/pmic-spmi 2>/dev/null | tr '\n' ' ')
+GLINKLIST=$(ls /sys/bus/platform/drivers/qcom_glink_rpm 2>/dev/null | tr '\n' ' ')
+MBOXLIST=$(ls /sys/bus/platform/drivers/qcom_apcs_ipc 2>/dev/null | tr '\n' ' ')
+RPMSLIST=$(ls /sys/bus/platform/drivers/rpm-smd 2>/dev/null | tr '\n' ' ')
+RPMSGDEV=$(ls /sys/class/rpmsg 2>/dev/null | tr '\n' ' ')
+DMTXT=$(dmesg 2>/dev/null | grep -iE "dwc3|usb|eud|phy|oops|unable|error|warn|fail|symbol|defer|trace|glue|smm|gdsc|regulat|proxy|glink|rpm|smd|mbox|mailbox" | tail -c 700)
+PAGEA="PAGE-A mod=$MOD sysfs=$SYSFS step=$GLUE_STEP ret=$GLUE_RET rc=$MODRC
+out=$MODOUT
+REG:$(echo $REGNAMES | cut -c1-60)
+GDSC:$GDSCLIST
+GLINK:$GLINKLIST
+MBOX:$MBOXLIST
+RPMS:$RPMSLIST
+RPMSG:$RPMSGDEV
+$DMTXT"
+info "dace-init: página de texto preparada"
+# ── RONDA 2: hechos estructurales (franja 8 inferior = 1 → es la ronda 2) ──
+[ -d /sys/bus/platform/drivers/msm-dwc3 ] && C1=1 || C1=0
+C2=0
+for p in /sys/bus/platform/devices/*hsusb* /sys/bus/platform/devices/*4e00000*; do
+    [ -e "$p" ] && C2=1
+done
+[ "$MODRC" = "0" ] && C3=1 || C3=0
+echo "$MODOUT" | grep -q "Unknown symbol" && C4=1 || C4=0
+echo "$MODOUT" | grep -q "disagrees" && C5=1 || C5=0
+echo "$MODOUT" | grep -q "exists" && C6=1 || C6=0
+[ -z "$MODOUT" ] && C7=1 || C7=0
+dmesg 2>/dev/null | grep -q "msm-dwc3" && C8=1 || C8=0
+DMESG_ALL=$(dmesg 2>/dev/null)
+echo "$DMESG_ALL" | grep -q "already registered" && D1=1 || D1=0
+echo "$DMESG_ALL" | grep -q "Unable to handle" && D2=1 || D2=0
+echo "$DMESG_ALL" | grep -q "Call trace" && D3=1 || D3=0
+echo "$DMESG_ALL" | grep -q "disagrees about version" && D4=1 || D4=0
+echo "$DMESG_ALL" | grep -q "Unknown symbol" && D5=1 || D5=0
+NLOADED=$(ls /sys/module 2>/dev/null | wc -l)
+[ "$NLOADED" -ge 170 ] && D6=1 || D6=0
+[ -d /lib/modules ] && D7=1 || D7=0
+D8=1   # marca de ronda (ronda 2)
+CODE_R2="$C1$C2$C3$C4$C5$C6$C7$C8"
+CODE2_R2="$D1$D2$D3$D4$D5$D6$D7$D8"
+info "dace-init: BARCODE R2 = $CODE_R2 $CODE2_R2"
+if [ "$BARCODE_OK" = "1" ]; then
+    # bucle: PAGE-A (texto 56s) → barcode R2 (8s) → barcode R1 (8s)
+    if [ -e /sys/kernel/dace_text ]; then
+        while true; do
+            printf '%s\n' "$PAGEA" > /sys/kernel/dace_text 2>/dev/null
+            sleep 56
+            echo "$CODE_R2 $CODE2_R2" > /sys/kernel/dace_barcode 2>/dev/null
+            sleep 8
+            echo "$CODE $CODE2" > /sys/kernel/dace_barcode 2>/dev/null
+            sleep 8
+        done
+    fi
+    while true; do
+        sleep 8
+        echo "$CODE_R2 $CODE2_R2" > /sys/kernel/dace_barcode 2>/dev/null
+        sleep 8
+        echo "$CODE $CODE2" > /sys/kernel/dace_barcode 2>/dev/null
+    done
 fi
 if [ "$BARCODE_OK" != "1" ] && [ -e /sys/kernel/dace_color ]; then
     # Canal B: parpadeos (funciona aunque el barcode esté roto)

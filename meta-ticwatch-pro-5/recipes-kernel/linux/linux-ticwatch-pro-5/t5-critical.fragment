@@ -165,13 +165,17 @@ CONFIG_QCOM_RPROC_COMMON=y
 # MMC_CRYPTO tambien =m (el stock lo carga; lo necesita el subsistema
 # de almacenamiento seguro).
 
-# --- proxy-consumer: DEJADO =m (como el stock) ---
-# Lo apagamos siguiendo a aurora (que lo apaga porque gcc-monaco rompia
-# en SU hardware/build). Pero el STOCK del dace carga proxy-consumer.ko
-# en modules.load y gcc-monaco funciona. El "bootloop" que veiamos NO
-# era proxy-consumer: era la ausencia de dwc3-msm.ko (config roto) y,
-# sobre todo, la falta de la cadena crypto/hwkm/secure que impedia llegar
-# a userspace. Restaurado =m para replicar el stock (260 modulos).
+# --- proxy-consumer: APAGADO (fix USB v43, igual que aurora) ---
+# 24-08: con PROXY_CONSUMER=y el probe de gdsc-regulator hace
+# regulator_get(proxy) sobre un regulador RPM que no está up en first-stage
+# → defer -517 QUE NUNCA RESUELVE → el regulador USB3_GDSC jamás existe →
+# dwc3_msm_probe difiere -517 en devm_regulator_get(USB3_GDSC) → sin UDC →
+# sin adb (verificado v39-v42: step=17 ret=-517). Aurora (mismo SoC/kernel)
+# lo documenta y lo apaga: sin él, la llamada proxy es un stub no-op y el
+# gdsc se registra. El stock carga proxy-consumer.ko con timing de
+# second-stage que nosotros no tenemos. Efecto: solo se pierde el votado
+# temprano de boot (optimización), nada funcional.
+# CONFIG_REGULATOR_PROXY_CONSUMER is not set
 # CONFIG_REGULATOR_PROXY_CONSUMER_LEGACY is not set
 
 # --- SLATE/SEB: HABILITADOS =m (el dace los NECESITA) ---

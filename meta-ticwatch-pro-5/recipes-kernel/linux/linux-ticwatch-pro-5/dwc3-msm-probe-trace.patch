@@ -4,21 +4,22 @@ Subject: [PATCH] usb: dwc3: dwc3-msm: trace probe steps via /sys/kernel/dace_glu
 Instrumentación de bring-up: registra en qué paso de dwc3_msm_probe se
 queda el glue (0 = probe nunca llamado; 1..7 pasos; bit4 = salió por err,
 con el errno en dace_glue_ret). Expuesto en /sys/kernel/dace_glue para
-telemetría por barcode sin UART. Sin cambios funcionales.
+telemetría por barcode sin UART. El sysfs se crea desde dwc3_msm_init
+(module init) para que exista aunque el probe nunca se llame.
+Sin cambios funcionales.
 
 Upstream-Status: Inappropriate [dace bring-up]
 ---
- drivers/usb/dwc3/dwc3-msm-core.c | 60 ++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 60 insertions(+)
+ drivers/usb/dwc3/dwc3-msm-core.c | 66 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 66 insertions(+)
 
 --- a/drivers/usb/dwc3/dwc3-msm-core.c
 +++ b/drivers/usb/dwc3/dwc3-msm-core.c
-@@ -5596,6 +5596,26 @@
+@@ -5596,6 +5596,24 @@
  	return ret;
  }
  
-+
-+/* dace trace: paso actual del probe del glue (0 = nunca llamado) */
++/* dace trace: paso actual del probe del glue (0 = probe nunca llamado) */
 +int dace_glue_step = 0;
 +int dace_glue_ret = 0;
 +
@@ -31,32 +32,31 @@ Upstream-Status: Inappropriate [dace bring-up]
 +}
 +static struct kobj_attribute dace_glue_attr =
 +	__ATTR(dace_glue, 0444, dace_glue_show, NULL);
-+static int __init dace_glue_sysfs_init(void)
++static int dace_glue_sysfs_init(void)
 +{
 +	return sysfs_create_file(kernel_kobj, &dace_glue_attr.attr);
 +}
-+late_initcall(dace_glue_sysfs_init);
 +
  static int dwc3_msm_probe(struct platform_device *pdev)
  {
  	struct device_node *node = pdev->dev.of_node, *dwc3_node, *phy_node;
-@@ -5606,6 +5626,7 @@
- 	u32 val;
- 
- 	mdwc = devm_kzalloc(&pdev->dev, sizeof(*mdwc), GFP_KERNEL);
-+	dace_glue_step = 1;
- 	if (!mdwc)
+@@ -5610,6 +5628,7 @@
  		return -ENOMEM;
  
-@@ -5724,6 +5745,7 @@
- 							"ahb2phy_base");
+ 	platform_set_drvdata(pdev, mdwc);
++	dace_glue_step = 1;
+ 	mdwc->dev = &pdev->dev;
+ 
+ 	INIT_LIST_HEAD(&mdwc->req_complete_list);
+@@ -5725,6 +5744,7 @@
  	if (res) {
  		mdwc->ahb2phy_base = devm_ioremap(&pdev->dev,
-+	dace_glue_step = 2;
  					res->start, resource_size(res));
++	dace_glue_step = 2;
  		if (IS_ERR_OR_NULL(mdwc->ahb2phy_base)) {
  			dev_err(dev, "couldn't find ahb2phy_base addr.\n");
-@@ -5829,6 +5851,7 @@
+ 			mdwc->ahb2phy_base = NULL;
+@@ -5829,6 +5849,7 @@
  		ret = PTR_ERR(mdwc->hs_phy);
  		goto err;
  	}
@@ -64,7 +64,7 @@ Upstream-Status: Inappropriate [dace bring-up]
  
  	phy_node = of_parse_phandle(dwc3_node, "usb-phy", 1);
  	mdwc->ss_phy = devm_usb_get_phy_by_node(mdwc->dev, phy_node, NULL);
-@@ -5837,6 +5860,7 @@
+@@ -5837,6 +5858,7 @@
  		ret = PTR_ERR(mdwc->ss_phy);
  		goto err;
  	}
@@ -72,15 +72,15 @@ Upstream-Status: Inappropriate [dace bring-up]
  
  	/* use default as nominal bus voting */
  	mdwc->default_bus_vote = BUS_VOTE_NOMINAL;
-@@ -5890,6 +5914,7 @@
- 
+@@ -5891,6 +5913,7 @@
  		role_desc.fwnode = dev_fwnode(&pdev->dev);
  		mdwc->role_switch = usb_role_switch_register(mdwc->dev,
-+	dace_glue_step = 5;
  								&role_desc);
++	dace_glue_step = 5;
  		if (IS_ERR(mdwc->role_switch)) {
  			ret = PTR_ERR(mdwc->role_switch);
-@@ -5901,6 +5926,7 @@
+ 			goto put_dwc3;
+@@ -5901,6 +5924,7 @@
  		ret = dwc3_msm_extcon_register(mdwc);
  		if (ret)
  			goto put_dwc3;
@@ -88,7 +88,7 @@ Upstream-Status: Inappropriate [dace bring-up]
  
  		/*
  		 * dpdm regulator will be turned on to perform apsd
-@@ -5964,6 +5990,7 @@
+@@ -5964,6 +5988,7 @@
  	if (of_property_read_bool(node, "qcom,msm-probe-core-init"))
  		dwc3_ext_event_notify(mdwc);
  
@@ -96,7 +96,7 @@ Upstream-Status: Inappropriate [dace bring-up]
  	return 0;
  
  put_dwc3:
-@@ -5972,6 +5999,8 @@
+@@ -5972,6 +5997,8 @@
  		icc_put(mdwc->icc_paths[i]);
  
  err:
@@ -105,3 +105,11 @@ Upstream-Status: Inappropriate [dace bring-up]
  	destroy_workqueue(mdwc->sm_usb_wq);
  	destroy_workqueue(mdwc->dwc3_wq);
  	usb_put_redriver(mdwc->redriver);
+@@ -6978,6 +7005,7 @@
+ 
+ static int dwc3_msm_init(void)
+ {
++	dace_glue_sysfs_init();
+ 	dwc3_msm_kretprobe_init();
+ 	return platform_driver_register(&dwc3_msm_driver);
+ }
