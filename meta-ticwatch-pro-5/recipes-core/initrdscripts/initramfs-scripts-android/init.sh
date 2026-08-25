@@ -242,7 +242,7 @@ stage 3 "adbd-launched" 0x00ff8000     # NARANJA: adbd lanzado
     RBGCC=$(trybind "qcom,monaco-gcc" gcc-monaco)
     RBGD=$(trybind "qcom,gdsc" gdsc gcc_usb20_prim_gdsc)
     RBEU=$(trybind "qcom,msm-eud" msm-eud)
-    RBGL=$(trybind "qcom,dwc-usb3-msm" msm-dwc3)
+    RBGL="-"   # v54: el glue se bindea DESPUÉS (fase GLUE del bucle, con marcador)
     sleep 2
 
 UDC=""
@@ -513,7 +513,10 @@ CODE_R2="$C1$C2$C3$C4$C5$C6$C7$C8"
 CODE2_R2="$D1$D2$D3$D4$D5$D6$D7$D8"
 info "dace-init: BARCODE R2 = $CODE_R2 $CODE2_R2"
 if [ "$BARCODE_OK" = "1" ]; then
-    # bucle v50: dmesg (14s) → R-chain (12s) → R1 (8s) → R2 (8s) = 42s
+    # bucle v54: dmesg (14s) → R-chain (12s) → R1 (8s) → R2 (8s) = 42s.
+    # Tras 2 ciclos, fase GLUE (GRIS): bind del glue en background c/ timeout.
+    # Si aparece UDC, fase GADGET (ROSA→ROJO/MAGENTA).
+    NLOOP=0; GLUE_DONE=0
     while true; do
         [ -e /sys/kernel/dace_text ] && \
             printf '%s\n' "$P3" > /sys/kernel/dace_text 2>/dev/null
@@ -521,6 +524,61 @@ if [ "$BARCODE_OK" = "1" ]; then
         echo "$CHAIN 10101010" > /sys/kernel/dace_barcode 2>/dev/null; sleep 12
         echo "$CODE $CODE2" > /sys/kernel/dace_barcode 2>/dev/null; sleep 8
         echo "$CODE_R2 $CODE2_R2" > /sys/kernel/dace_barcode 2>/dev/null; sleep 8
+        NLOOP=$((NLOOP+1))
+        if [ "$NLOOP" -ge 2 ] && [ "$GLUE_DONE" = "0" ]; then
+            GLUE_DONE=1
+            echo 0x00808080 > /sys/kernel/dace_color 2>/dev/null  # GRIS: fase GLUE
+            RBGL=$(trybind "qcom,dwc-usb3-msm" msm-dwc3)
+            info "v54: fase GLUE rb=$RBGL"
+            sleep 5
+            UDC=$(cd /sys/class/udc 2>/dev/null && echo *)
+            case "$UDC" in '*'|''|'.'|'..') UDC="" ;; esac
+            if [ -n "$UDC" ]; then
+                UDC=$(echo "$UDC" | awk '{print $1}')
+                info "v54: UDC=$UDC; bind gadget en subshell c/timeout"
+                echo 0x00ff00aa > /sys/kernel/dace_color 2>/dev/null  # ROSA
+                rm -f /tmp/udc_rc
+                ( echo "$UDC" > /sys/kernel/config/usb_gadget/*/UDC 2>/dev/kmsg
+                  echo $? > /tmp/udc_rc ) &
+                UDCPID=$!; j=0
+                while [ "$j" -lt 15 ] && kill -0 "$UDCPID" 2>/dev/null; do
+                    sleep 1; j=$((j+1))
+                done
+                if kill -0 "$UDCPID" 2>/dev/null; then
+                    UDCBIND=H
+                    echo 0x00ff0000 > /sys/kernel/dace_color 2>/dev/null  # ROJO
+                    info "v54: gadget bind COLGADO >15s"
+                else
+                    UDCBIND=$(cat /tmp/udc_rc 2>/dev/null)
+                    stage 4 "udc-bound" 0x00ff00ff
+                    info "v54: gadget bind rc=$UDCBIND"
+                fi
+            else
+                info "v54: glue rb=$RBGL pero sin UDC en 5s"
+            fi
+            # refrescar R1 (F facts + glue trace) y P3 con el nuevo estado
+            bound /sys/bus/platform/drivers/msm-dwc3 && F4=1 || F4=0
+            bound /sys/bus/platform/drivers/dwc3 && F5=1 || F5=0
+            F6=0; for f in /sys/class/udc/*; do [ -e "$f" ] && F6=1; done
+            CODE="$F1$F2$F3$F4$F5$F6$F7$F8"
+            GLUE_STEP=0; GLUE_RET=0
+            [ -e /sys/kernel/dace_glue ] && read -r GLUE_STEP GLUE_RET < /sys/kernel/dace_glue 2>/dev/null
+            CODE2="$MOD$SYSFS$(( (GLUE_STEP >> 2) & 1 ))$(( (GLUE_STEP >> 1) & 1 ))$(( GLUE_STEP & 1 ))$(( (GLUE_STEP >> 4) & 1 ))$(( (GLUE_STEP >> 5) & 1 ))$(( (GLUE_STEP >> 6) & 1 ))"
+            DFN=0
+            if [ -e /sys/kernel/debug/devices_deferred ]; then
+                while IFS= read -r l; do [ -n "$l" ] && DFN=$((DFN+1)); done < /sys/kernel/debug/devices_deferred
+            else
+                DFN=-1
+            fi
+            P3=$(cat <<EOFP3B | wrap33 | firstlines 13
+DFR=$DFN cc=$RBCC gcc=$RBGCC ub=$UDCBIND
+gd=$RBGD eu=$RBEU gl=$RBGL glue:$GLUE_STEP,$GLUE_RET
+$(cat /sys/kernel/debug/devices_deferred 2>/dev/null | tr '\t' ' ')
+$(dmesg 2>/dev/null | grep -iE "dwc3|hsusb|usb|eud|phy|fail|error|warn|gdsc|clk|probe of" | grep -viE "usb_f_|configfs" | tail -c 600)
+EOFP3B
+)
+            info "v54: R1/P3 refrescados tras fase GLUE"
+        fi
     done
 fi
 if [ "$BARCODE_OK" != "1" ] && [ -e /sys/kernel/dace_color ]; then
