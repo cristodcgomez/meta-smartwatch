@@ -527,7 +527,7 @@ if [ "$BARCODE_OK" = "1" ]; then
         echo "$CODE $CODE2" > /sys/kernel/dace_barcode 2>/dev/null; sleep 8
         echo "$CODE_R2 $CODE2_R2" > /sys/kernel/dace_barcode 2>/dev/null; sleep 8
         NLOOP=$((NLOOP+1))
-        if [ "$NLOOP" -ge 2 ] && [ "$GLUE_DONE" = "0" ]; then
+        if [ "$NLOOP" -ge 1 ] && [ "$GLUE_DONE" = "0" ]; then
             GLUE_DONE=1
             echo 0x00808080 > /sys/kernel/dace_color 2>/dev/null  # GRIS: fase GLUE
             RBGL=$(trybind "qcom,dwc-usb3-msm" msm-dwc3)
