@@ -328,12 +328,12 @@ else
     info "dace-init: sin /sys/kernel/dace_barcode — MORADO"
     [ -e /sys/kernel/dace_color ] && echo 0x00aa00aa > /sys/kernel/dace_color
 fi
-# ── PÁGINAS DE TEXTO v3 (rotan con los barcodes en el bucle final) ──
-# v47: las 4 páginas salieron NEGRAS (el renderer del kernel pinta negro si
-# el texto llega vacío; los barcodes sí se pintaban). v48: página P0 de
-# control 100% estática (si P0 se ve, write+renderer están OK) y P1-P4
-# construidas SOLO con bash (sin awk/sed/head/tr en el camino crítico) +
-# guardas anti-vacío + conteo de bytes a kmsg.
+# ── PÁGINAS DE TEXTO v4 (rotan con los barcodes en el bucle final) ──
+# v48: P0 control OK (write+renderer funcionan). P1/P2 ilegibles por listas
+# largas (nombres rpmsg) que envuelven y desbordan. v49: la LISTA DE
+# DEFERIDOS (devices_deferred) es P1 (el dato más valioso), P2 = booleans
+# cortos de la cadena (sin listas de nombres), P3/P4 = dmesg. Sin listas
+# largas → nada se come la página.
 mount -t debugfs none /sys/kernel/debug 2>/dev/null
 # wrap a 33 chars, solo bash
 wrap33() {
@@ -346,7 +346,6 @@ wrap33() {
         printf '%s\n' "$l"
     done
 }
-# primeras N líneas, solo bash
 firstlines() {
     local n=$1 l c=0
     while IFS= read -r l; do
@@ -355,7 +354,6 @@ firstlines() {
         c=$((c+1))
     done
 }
-# salta N líneas, solo bash
 skiplines() {
     local n=$1 l c=0
     while IFS= read -r l; do
@@ -368,22 +366,31 @@ drv_of() { # $1 = device platform; driver bound o '-' (solo bash+readlink)
     d=$(readlink "/sys/bus/platform/devices/$1/driver" 2>/dev/null)
     if [ -n "$d" ]; then echo "${d##*/}"; else echo "-"; fi
 }
+yn() { [ "$1" != "-" ] && echo Y || echo N; }
 
-MBOX_D=$(drv_of f111000.mailbox)
-GLK_D=$(drv_of rpm-glink)
-RSD_D=$(drv_of qcom,rpm-smd)
-PSCI_D=$(drv_of psci)
-RPB=""
-for f in /sys/bus/rpmsg/devices/*; do
-    [ -e "$f" ] && RPB="$RPB${RPB:+,}${f##*/}"
+# ── hechos de la cadena (booleans) ──
+MBOX_D=$(drv_of f111000.mailbox)      # qcom_apcs_ipc
+GLK_D=$(drv_of rpm-glink)             # qcom_glink_rpm
+RSD_D=$(drv_of qcom,rpm-smd)          # rpm-smd (platform)
+PSCI_D=$(drv_of psci)                 # cpuidle-psci-domain (genpd cluster)
+GCC_D=$(drv_of 1410000.clock-controller) # gcc-monaco (qcom,monaco-gcc)
+[ "$GCC_D" = "-" ] && GCC_D=$(drv_of soc:clock-controller)
+[ "$GCC_D" = "-" ] && for f in /sys/bus/platform/drivers/gcc-monaco/*; do
+    case "${f##*/}" in bind|unbind|module|uevent) ;; *) [ -e "$f" ] && GCC_D="${f##*/}" ;; esac
 done
-[ -z "$RPB" ] && RPB=-
-RPD=""
+EUD_D=$(drv_of 1610000.qcom,msm-eud)   # msm-eud
+[ "$EUD_D" = "-" ] && EUD_D=$(drv_of eud)
+[ "$EUD_D" = "-" ] && for f in /sys/bus/platform/drivers/msm-eud/*; do
+    case "${f##*/}" in bind|unbind|module|uevent) ;; *) [ -e "$f" ] && EUD_D="${f##*/}" ;; esac
+done
+RQ=N
+for f in /sys/bus/rpmsg/devices/*rpm_requests*; do
+    [ -e "$f" ] && RQ=Y
+done
+RPDN=0
 for f in /sys/bus/rpmsg/drivers/*; do
-    [ -e "$f" ] && RPD="$RPD${RPD:+,}${f##*/}"
+    [ -e "$f" ] && RPDN=$((RPDN+1))
 done
-[ -z "$RPD" ] && RPD=-
-# girq: virq:cuenta del irq glink, solo bash
 GIRQ=-
 while read -r a b rest; do
     case "$rest" in
@@ -391,58 +398,54 @@ while read -r a b rest; do
     esac
 done < /proc/interrupts 2>/dev/null
 
-REGN=0; REGNAMES=""
-for rn in /sys/class/regulator/regulator*/name; do
-    [ -e "$rn" ] || continue
-    REGN=$((REGN+1))
-    REGNAMES="$REGNAMES $(cat "$rn" 2>/dev/null)"
-done
-CX=0;  case "$REGNAMES" in *pm5100_s1_level*) CX=1 ;; esac
-USB3G=0; case "$REGNAMES" in *[Uu][Ss][Bb]3*) USB3G=1 ;; esac
-GDSCN=0
-for f in /sys/bus/platform/drivers/gdsc/*; do
-    case "${f##*/}" in bind|unbind|module|uevent) ;; *) [ -e "$f" ] && GDSCN=$((GDSCN+1)) ;; esac
-done
-DEFER=$(cat /sys/kernel/debug/devices_deferred 2>/dev/null)
-DEFER="${DEFER//$'\t'/ }"
-
+# ── P1: lista de DEFERIDOS (devices_deferred) — el dato clave ──
 P0="P0 RENDER TEST
 ABCDEFGHIJKLMN OPQ
 RSTUVWXYZ 012345
 56789 .,:-+=*/()
 linea-cinco 555
-v48 control OK"
+v49 control OK"
 
-P1=$(printf '%s\n' "P1 CHAIN v48" "mbox:$MBOX_D" "glk:$GLK_D" "rsd:$RSD_D" \
-    "psci:$PSCI_D" "rpb:$RPB" "rpd:$RPD" "girq:$GIRQ" | wrap33 | firstlines 13)
+DEFER=$(cat /sys/kernel/debug/devices_deferred 2>/dev/null)
+DEFER="${DEFER//$'\t'/ }"
+DFN=0
+while IFS= read -r l; do
+    [ -n "$l" ] && DFN=$((DFN+1))
+done <<EOF2
+$DEFER
+EOF2
+# -1 = no existe el fichero (debugfs sin montar); 0 = existe pero vacío
+[ -e /sys/kernel/debug/devices_deferred ] || DFN=-1
+# sublista relevante para la cadena RPM/reguladores/USB
+DFREL=$(printf '%s\n' "$DEFER" | grep -iE "rpm|smd|regulat|gdsc|usb|glink|mbox|apcs|clk|hsusb|dwc3|eud|psci" | head -30)
+DFRELN=0
+while IFS= read -r l; do
+    [ -n "$l" ] && DFRELN=$((DFRELN+1))
+done <<EOF3
+$DFREL
+EOF3
+P1=$(printf '%s\n%s\n' "P1 DFR tot=$DFN rel=$DFRELN" "$(printf '%s\n' "$DFREL" | wrap33 | firstlines 12)" | firstlines 13)
 [ -z "$P1" ] && P1="P1 BUILD-FAIL"
 
-P2="P2 REG n=$REGN cx=$CX u3=$USB3G g=$GDSCN"
-RL=""; NL=""
-for w in $REGNAMES; do
-    if [ -z "$RL" ]; then
-        RL=$w
-    elif [ $(( ${#RL} + ${#w} + 1 )) -le 33 ]; then
-        RL="$RL $w"
-    else
-        NL="$NL$RL"$'\n'; RL=$w
-    fi
-done
-[ -n "$RL" ] && NL="$NL$RL"$'\n'
-P2="$P2
-$(printf '%s' "$NL" | firstlines 4)
-DFR:
-$(printf '%s\n' "$DEFER" | wrap33 | firstlines 5)"
+# ── P2: booleans de la cadena + estado del glue ──
+GLUE2="?"
+[ -e /sys/kernel/dace_glue ] && read -r GLUE2 RET2 < /sys/kernel/dace_glue 2>/dev/null
+P2="P2 v49 CHAIN
+mb:$(yn $MBOX_D) gl:$(yn $GLK_D) rs:$(yn $RSD_D)
+ps:$(yn $PSCI_D) gcc:$(yn $GCC_D) eud:$(yn $EUD_D)
+rq:$RQ rpd:$RPDN girq:$GIRQ
+glue:$GLUE2 ${RET2:-?}"
 P2=$(printf '%s\n' "$P2" | firstlines 13)
 [ -z "$P2" ] && P2="P2 BUILD-FAIL"
 
+# ── P3/P4: dmesg filtrado ──
 DMF=$(dmesg 2>/dev/null | grep -iE "glink|rpm|smd|mbox|mailbox|psci|domain|genpd|defer|regulat|gdsc|proxy|eud|dwc3|oops|warn" | tail -c 1100 | wrap33)
 P3=$(printf '%s\n%s\n' "P3 DMESG-1" "$(printf '%s\n' "$DMF" | firstlines 11)" | firstlines 13)
 [ -z "$P3" ] && P3="P3 BUILD-FAIL"
 P4=$(printf '%s\n%s\n' "P4 DMESG-2" "$(printf '%s\n' "$DMF" | skiplines 11 | firstlines 11)" | firstlines 13)
 [ -z "$P4" ] && P4="P4 BUILD-FAIL"
 
-info "dace-init: paginas v48 bytes P0=$(printf '%s' "$P0" | wc -c) P1=$(printf '%s' "$P1" | wc -c) P2=$(printf '%s' "$P2" | wc -c) P3=$(printf '%s' "$P3" | wc -c) P4=$(printf '%s' "$P4" | wc -c)"
+info "dace-init: paginas v49 bytes P0=$(printf '%s' "$P0" | wc -c) P1=$(printf '%s' "$P1" | wc -c) P2=$(printf '%s' "$P2" | wc -c) P3=$(printf '%s' "$P3" | wc -c) P4=$(printf '%s' "$P4" | wc -c)"
 # ── RONDA 2: hechos estructurales (franja 8 inferior = 1 → es la ronda 2) ──
 [ -d /sys/bus/platform/drivers/msm-dwc3 ] && C1=1 || C1=0
 C2=0
