@@ -328,28 +328,60 @@ else
     info "dace-init: sin /sys/kernel/dace_barcode — MORADO"
     [ -e /sys/kernel/dace_color ] && echo 0x00aa00aa > /sys/kernel/dace_color
 fi
-# ── PÁGINAS DE TEXTO (rotan con los barcodes en el bucle final) ──
-REGNAMES=""
+# ── PÁGINAS DE TEXTO v2 (rotan con los barcodes en el bucle final) ──
+# v46: PAGE-A única se desbordaba (el render trunca/centra; solo se vio la
+# cola del dmesg). v47: 4 páginas cortas (≤12 líneas, ≤33 chars/línea =
+# dentro de la cuerda del círculo en toda la página; fold con sed a 33).
+mount -t debugfs none /sys/kernel/debug 2>/dev/null
+drv_of() { # $1 = nombre de device platform; imprime driver bound o '-'
+    local d
+    d=$(readlink "/sys/bus/platform/devices/$1/driver" 2>/dev/null | sed 's|.*/||')
+    [ -n "$d" ] && echo "$d" || echo "-"
+}
+# fold a 33 chars (awk, que seguro existe; no dependemos del \n de sed)
+wrap33() { awk '{ while (length($0) > 33) { print substr($0, 1, 33); $0 = substr($0, 34) } if (length($0) > 0) print }'; }
+
+MBOX_D=$(drv_of f111000.mailbox)
+GLK_D=$(drv_of rpm-glink)
+RSD_D=$(drv_of qcom,rpm-smd)
+PSCI_D=$(drv_of psci)
+RPB=$(ls /sys/bus/rpmsg/devices 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+[ -z "$RPB" ] && RPB=-
+RPD=$(ls /sys/bus/rpmsg/drivers 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+[ -z "$RPD" ] && RPD=-
+# girq: "<virq>:<cuenta>" del irq glink (top-hitter de qcom_wdt lo confirma)
+GIRQ=$(awk '/glink/ { gsub(":", ""); print $1 ":" $2; exit }' /proc/interrupts 2>/dev/null)
+[ -z "$GIRQ" ] && GIRQ=-
+# toda página: wrap33 + tope 13 líneas (el círculo admite ~28; margen amplio)
+pagefit() { wrap33 | head -13; }
+
+REGN=0; REGNAMES=""
 for rn in /sys/class/regulator/regulator*/name; do
-    [ -e "$rn" ] && REGNAMES="$REGNAMES $(cat "$rn" 2>/dev/null)"
+    [ -e "$rn" ] || continue
+    REGN=$((REGN+1))
+    REGNAMES="$REGNAMES $(cat "$rn" 2>/dev/null)"
 done
-GDSCLIST=$(ls /sys/bus/platform/drivers/gdsc 2>/dev/null | tr '\n' ' ')
-PMICLIST=$(ls /sys/bus/spmi/drivers/pmic-spmi 2>/dev/null | tr '\n' ' ')
-GLINKLIST=$(ls /sys/bus/platform/drivers/qcom_glink_rpm 2>/dev/null | tr '\n' ' ')
-MBOXLIST=$(ls /sys/bus/platform/drivers/qcom_apcs_ipc 2>/dev/null | tr '\n' ' ')
-RPMSLIST=$(ls /sys/bus/platform/drivers/rpm-smd 2>/dev/null | tr '\n' ' ')
-RPMSGDEV=$(ls /sys/class/rpmsg 2>/dev/null | tr '\n' ' ')
-DMTXT=$(dmesg 2>/dev/null | grep -iE "dwc3|usb|eud|phy|oops|unable|error|warn|fail|symbol|defer|trace|glue|smm|gdsc|regulat|proxy|glink|rpm|smd|mbox|mailbox" | tail -c 700)
-PAGEA="PAGE-A mod=$MOD sysfs=$SYSFS step=$GLUE_STEP ret=$GLUE_RET rc=$MODRC
-out=$MODOUT
-REG:$(echo $REGNAMES | cut -c1-60)
-GDSC:$GDSCLIST
-GLINK:$GLINKLIST
-MBOX:$MBOXLIST
-RPMS:$RPMSLIST
-RPMSG:$RPMSGDEV
-$DMTXT"
-info "dace-init: página de texto preparada"
+CX=0;  echo "$REGNAMES" | grep -q "pm5100_s1_level" && CX=1
+USB3G=0; echo "$REGNAMES" | grep -qi "usb3_gdsc" && USB3G=1
+GDSCN=$(ls /sys/bus/platform/drivers/gdsc 2>/dev/null | grep -vcE '^(bind|unbind|module|uevent)$')
+DEFER=$(cat /sys/kernel/debug/devices_deferred 2>/dev/null | tr '\t' ' ')
+
+P1=$(printf '%s\n' "P1 CHAIN v47" "mbox:$MBOX_D" "glk:$GLK_D" "rsd:$RSD_D" \
+    "psci:$PSCI_D" "rpb:$RPB" "rpd:$RPD" "girq:$GIRQ" | pagefit)
+
+P2=$(cat <<EOF | pagefit
+P2 REG n=$REGN cx=$CX u3=$USB3G gdsc=$GDSCN
+$(echo $REGNAMES | wrap33 | head -4)
+DFR:
+$(echo "$DEFER" | wrap33 | head -5)
+EOF
+)
+
+DMF=$(dmesg 2>/dev/null | grep -iE "glink|rpm|smd|mbox|mailbox|psci|domain|genpd|defer|regulat|gdsc|proxy|eud|dwc3|oops|warn" | tail -c 1100 | wrap33)
+P3=$(printf '%s\n' "P3 DMESG-1" "$(echo "$DMF" | head -11)" | pagefit)
+P4=$(printf '%s\n' "P4 DMESG-2" "$(echo "$DMF" | tail -n +12 | head -11)" | pagefit)
+
+info "dace-init: páginas de texto P1-P4 preparadas"
 # ── RONDA 2: hechos estructurales (franja 8 inferior = 1 → es la ronda 2) ──
 [ -d /sys/bus/platform/drivers/msm-dwc3 ] && C1=1 || C1=0
 C2=0
@@ -376,15 +408,15 @@ CODE_R2="$C1$C2$C3$C4$C5$C6$C7$C8"
 CODE2_R2="$D1$D2$D3$D4$D5$D6$D7$D8"
 info "dace-init: BARCODE R2 = $CODE_R2 $CODE2_R2"
 if [ "$BARCODE_OK" = "1" ]; then
-    # bucle: PAGE-A (texto 56s) → barcode R2 (8s) → barcode R1 (8s)
+    # bucle: P1→P2→P3→P4 (16s c/u) → barcode R2 (8s) → barcode R1 (8s)
     if [ -e /sys/kernel/dace_text ]; then
         while true; do
-            printf '%s\n' "$PAGEA" > /sys/kernel/dace_text 2>/dev/null
-            sleep 56
-            echo "$CODE_R2 $CODE2_R2" > /sys/kernel/dace_barcode 2>/dev/null
-            sleep 8
-            echo "$CODE $CODE2" > /sys/kernel/dace_barcode 2>/dev/null
-            sleep 8
+            printf '%s\n' "$P1" > /sys/kernel/dace_text 2>/dev/null; sleep 16
+            printf '%s\n' "$P2" > /sys/kernel/dace_text 2>/dev/null; sleep 16
+            printf '%s\n' "$P3" > /sys/kernel/dace_text 2>/dev/null; sleep 16
+            printf '%s\n' "$P4" > /sys/kernel/dace_text 2>/dev/null; sleep 16
+            echo "$CODE_R2 $CODE2_R2" > /sys/kernel/dace_barcode 2>/dev/null; sleep 8
+            echo "$CODE $CODE2" > /sys/kernel/dace_barcode 2>/dev/null; sleep 8
         done
     fi
     while true; do
