@@ -206,7 +206,9 @@ stage 3 "adbd-launched" 0x00ff8000     # NARANJA: adbd lanzado
     # de gcc). v52 localiza cada device por COMPATIBLE (inmune a nombres) y
     # bindea en orden de dependencias si no está ya bindeado.
     trybind() { # $1=compatible $2=driver [$3=regulator-name opcional]
-        local d dev="" rc
+        # devuelve: Y=ya bindeado | N=device no existe | H=bind COLGADO |
+        #           <rc>=bind terminó con ese errno
+        local d dev="" pid t rc
         for d in /sys/bus/platform/devices/*; do
             [ -e "$d/of_node/compatible" ] || continue
             grep -qa "$1" "$d/of_node/compatible" 2>/dev/null || continue
@@ -216,14 +218,25 @@ stage 3 "adbd-launched" 0x00ff8000     # NARANJA: adbd lanzado
             dev="${d##*/}"
         done
         if [ -z "$dev" ]; then
-            info "v52: $1 device NO existe"; echo N; return
+            info "v53: $1 device NO existe"; echo N; return
         fi
         if [ -e "/sys/bus/platform/devices/$dev/driver" ]; then
-            info "v52: $dev ya bindeado"; echo Y; return
+            info "v53: $dev ya bindeado"; echo Y; return
         fi
-        echo "$dev" > "/sys/bus/platform/drivers/$2/bind" 2>/dev/kmsg; rc=$?
-        info "v52: bind $2 <- $dev rc=$rc"
-        echo "$rc"; sleep 1
+        rm -f /tmp/rb_rc
+        ( echo "$dev" > "/sys/bus/platform/drivers/$2/bind" 2>/dev/kmsg
+          echo $? > /tmp/rb_rc ) &
+        pid=$!; t=0
+        while [ "$t" -lt 12 ] && kill -0 "$pid" 2>/dev/null; do
+            sleep 1; t=$((t+1))
+        done
+        if kill -0 "$pid" 2>/dev/null; then
+            info "v53: bind $2 <- $dev COLGADO >12s (seguimos)"
+            echo H; return
+        fi
+        rc=$(cat /tmp/rb_rc 2>/dev/null)
+        info "v53: bind $2 <- $dev rc=$rc"
+        echo "${rc:-X}"; sleep 1
     }
     RBCC=$(trybind "qcom,rpmcc-monaco" qcom-clk-smd-rpm)
     RBGCC=$(trybind "qcom,monaco-gcc" gcc-monaco)
@@ -233,6 +246,7 @@ stage 3 "adbd-launched" 0x00ff8000     # NARANJA: adbd lanzado
     sleep 2
 
 UDC=""
+UDCBIND="?"
 i=0
 echo 0x0080ffff > /sys/kernel/dace_color 2>/dev/null  # AZUL CLARO: esperando UDC (30s)
 while [ $i -lt 30 ]; do
@@ -246,11 +260,26 @@ done
 if [ -n "$UDC" ]; then
     UDC=$(echo "$UDC" | awk '{print $1}')
     info "dace-init: UDC=$UDC after ~${i}s"
-    # Bound configfs gadget UDC
-    echo "$UDC" > /sys/kernel/config/usb_gadget/*/UDC 2>/dev/kmsg && \
-        info "dace-init: UDC bound" || \
-        info "dace-init: UDC bind FAILED (write error)"
-    stage 4 "udc-bound" 0x00ff00ff # MAGENTA: gadget activo (adb debería verse)
+    # Bound configfs gadget UDC — CON TIMEOUT: en v52 esta escritura colgó
+    # el init para siempre (pantalla azul claro). El bind se manda a un
+    # subshell; si no vuelve en 15s seguimos con la telemetría igualmente.
+    echo 0x00ff00aa > /sys/kernel/dace_color 2>/dev/null  # ROSA: bind UDC en curso
+    rm -f /tmp/udc_rc
+    ( echo "$UDC" > /sys/kernel/config/usb_gadget/*/UDC 2>/dev/kmsg
+      echo $? > /tmp/udc_rc ) &
+    UDCPID=$!; j=0
+    while [ "$j" -lt 15 ] && kill -0 "$UDCPID" 2>/dev/null; do
+        sleep 1; j=$((j+1))
+    done
+    if kill -0 "$UDCPID" 2>/dev/null; then
+        info "dace-init: UDC bind COLGADO >15s (kernel; seguimos)"
+        echo 0x00ff0000 > /sys/kernel/dace_color 2>/dev/null  # ROJO: bind colgado
+        UDCBIND=H
+    else
+        UDCBIND=$(cat /tmp/udc_rc 2>/dev/null)
+        info "dace-init: UDC bind rc=$UDCBIND"
+        stage 4 "udc-bound" 0x00ff00ff # MAGENTA: gadget activo (adb debería verse)
+    fi
 else
     echo 0x000000aa > /sys/kernel/dace_color 2>/dev/null  # AZUL OSCURO: rama no-UDC
     info "dace-init: NO UDC after 30s — dwc3 no probeó o sin drivers. /sys/class/udc = '$(cd /sys/class/udc 2>/dev/null && echo *)'"
@@ -264,8 +293,17 @@ else
     case "$UDC" in '*'|''|'.'|'..') UDC="" ;; esac
     if [ -n "$UDC" ]; then
         info "dace-init: UDC apareció tras forzar role: $UDC"
-        echo "$UDC" > /sys/kernel/config/usb_gadget/*/UDC 2>/dev/null && \
+        ( echo "$UDC" > /sys/kernel/config/usb_gadget/*/UDC 2>/dev/null ) &
+        UDCPID=$!; j=0
+        while [ "$j" -lt 15 ] && kill -0 "$UDCPID" 2>/dev/null; do
+            sleep 1; j=$((j+1))
+        done
+        if kill -0 "$UDCPID" 2>/dev/null; then
+            info "dace-init: UDC bind (tras role) COLGADO >15s"
+            echo 0x00ff0000 > /sys/kernel/dace_color 2>/dev/null
+        else
             stage 4 "udc-bound" 0x00ff00ff
+        fi
     else
         info "dace-init: sigue sin UDC tras forzar role"
     fi
@@ -440,14 +478,15 @@ DEFER=$(cat /sys/kernel/debug/devices_deferred 2>/dev/null)
 DEFER="${DEFER//$'\t'/ }"
 DMF=$(dmesg 2>/dev/null | grep -iE "probe of|gcc|gdsc|clk|eud|dwc3|fail|error|warn|oops" | grep -viE "usb_f_|configfs" | tail -c 900 | wrap33)
 P3=$(cat <<EOFP3 | wrap33 | firstlines 13
-DFR=$DFN cc=$RBCC gcc=$RBGCC gd=$RBGD eu=$RBEU gl=$RBGL
+DFR=$DFN cc=$RBCC gcc=$RBGCC ub=$UDCBIND
+gd=$RBGD eu=$RBEU gl=$RBGL
 $DEFER
 $DMF
 EOFP3
 )
 [ -z "$P3" ] && P3="P3 vacio DFR=$DFN"
 
-info "dace-init: v52 CHAIN=$CHAIN mb=$MB gl=$GL rs=$RS gcc=$GCC eud=$EUD rq=$RQ cx=$CX u3=$U3 DFN=$DFN rb cc=$RBCC gcc=$RBGCC gd=$RBGD eu=$RBEU gl=$RBGL"
+info "dace-init: v53 CHAIN=$CHAIN mb=$MB gl=$GL rs=$RS gcc=$GCC eud=$EUD rq=$RQ cx=$CX u3=$U3 DFN=$DFN rb cc=$RBCC gcc=$RBGCC gd=$RBGD eu=$RBEU gl=$RBGL ub=$UDCBIND"
 # ── RONDA 2: hechos estructurales (franja 8 inferior = 1 → es la ronda 2) ──
 [ -d /sys/bus/platform/drivers/msm-dwc3 ] && C1=1 || C1=0
 C2=0
