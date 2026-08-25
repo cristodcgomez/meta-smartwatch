@@ -328,14 +328,13 @@ else
     info "dace-init: sin /sys/kernel/dace_barcode — MORADO"
     [ -e /sys/kernel/dace_color ] && echo 0x00aa00aa > /sys/kernel/dace_color
 fi
-# ── PÁGINAS DE TEXTO v4 (rotan con los barcodes en el bucle final) ──
-# v48: P0 control OK (write+renderer funcionan). P1/P2 ilegibles por listas
-# largas (nombres rpmsg) que envuelven y desbordan. v49: la LISTA DE
-# DEFERIDOS (devices_deferred) es P1 (el dato más valioso), P2 = booleans
-# cortos de la cadena (sin listas de nombres), P3/P4 = dmesg. Sin listas
-# largas → nada se come la página.
+# ── TELEMETRÍA v5 (v50): los booleans de la cadena RPM viajan en BARCODE ──
+# v49 demostró que el texto pequeño no se transcribe bien en el panel redondo.
+# v50: cadena RPM → barcode R-chain (ARRIBA los 8 datos, ABAJO marca 10101010
+# para identificar la ronda); se deja UNA sola página de texto (dmesg) y los
+# barcodes R1/R2 de siempre. Fuera: P0 (control), P1 (página deferidos),
+# P2 (texto booleans), P4 (dmesg-2). Menos pantallas, dato decisivo en franjas.
 mount -t debugfs none /sys/kernel/debug 2>/dev/null
-# wrap a 33 chars, solo bash
 wrap33() {
     local l
     while IFS= read -r l || [ -n "$l" ]; do
@@ -354,98 +353,63 @@ firstlines() {
         c=$((c+1))
     done
 }
-skiplines() {
-    local n=$1 l c=0
-    while IFS= read -r l; do
-        [ "$c" -ge "$n" ] && printf '%s\n' "$l"
-        c=$((c+1))
-    done
-}
-drv_of() { # $1 = device platform; driver bound o '-' (solo bash+readlink)
+drv_of() { # $1 = device platform; driver bound o '-'
     local d
     d=$(readlink "/sys/bus/platform/devices/$1/driver" 2>/dev/null)
     if [ -n "$d" ]; then echo "${d##*/}"; else echo "-"; fi
 }
-yn() { [ "$1" != "-" ] && echo Y || echo N; }
 
-# ── hechos de la cadena (booleans) ──
-MBOX_D=$(drv_of f111000.mailbox)      # qcom_apcs_ipc
-GLK_D=$(drv_of rpm-glink)             # qcom_glink_rpm
-RSD_D=$(drv_of qcom,rpm-smd)          # rpm-smd (platform)
-PSCI_D=$(drv_of psci)                 # cpuidle-psci-domain (genpd cluster)
-GCC_D=$(drv_of 1410000.clock-controller) # gcc-monaco (qcom,monaco-gcc)
+# ── hechos de la cadena RPM (bits del barcode R-chain) ──
+MBOX_D=$(drv_of f111000.mailbox)         # bit1 mb: qcom_apcs_ipc
+GLK_D=$(drv_of rpm-glink)                # bit2 gl: qcom_glink_rpm
+RSD_D=$(drv_of qcom,rpm-smd)             # bit3 rs: rpm-smd (platform)
+PSCI_D=$(drv_of psci)                    # bit4 ps: genpd psci/cluster-pd0
+GCC_D=$(drv_of 1410000.clock-controller) # bit5 gcc: gcc-monaco
 [ "$GCC_D" = "-" ] && GCC_D=$(drv_of soc:clock-controller)
 [ "$GCC_D" = "-" ] && for f in /sys/bus/platform/drivers/gcc-monaco/*; do
     case "${f##*/}" in bind|unbind|module|uevent) ;; *) [ -e "$f" ] && GCC_D="${f##*/}" ;; esac
 done
-EUD_D=$(drv_of 1610000.qcom,msm-eud)   # msm-eud
+EUD_D=$(drv_of 1610000.qcom,msm-eud)     # bit6 eud: msm-eud
 [ "$EUD_D" = "-" ] && EUD_D=$(drv_of eud)
 [ "$EUD_D" = "-" ] && for f in /sys/bus/platform/drivers/msm-eud/*; do
     case "${f##*/}" in bind|unbind|module|uevent) ;; *) [ -e "$f" ] && EUD_D="${f##*/}" ;; esac
 done
-RQ=N
+RQ=N                                     # bit7 rq: existe rpmsg rpm_requests
 for f in /sys/bus/rpmsg/devices/*rpm_requests*; do
     [ -e "$f" ] && RQ=Y
 done
-RPDN=0
-for f in /sys/bus/rpmsg/drivers/*; do
-    [ -e "$f" ] && RPDN=$((RPDN+1))
+CX=0                                     # bit8 cx: VDD_CX (pm5100_s1_level) registrado
+for rn in /sys/class/regulator/regulator*/name; do
+    [ -e "$rn" ] || continue
+    read -r nm < "$rn" 2>/dev/null
+    [ "$nm" = "pm5100_s1_level" ] && CX=1
 done
-GIRQ=-
-while read -r a b rest; do
-    case "$rest" in
-        *glink*) GIRQ="${a%:}:$b"; break ;;
-    esac
-done < /proc/interrupts 2>/dev/null
 
-# ── P1: lista de DEFERIDOS (devices_deferred) — el dato clave ──
-P0="P0 RENDER TEST
-ABCDEFGHIJKLMN OPQ
-RSTUVWXYZ 012345
-56789 .,:-+=*/()
-linea-cinco 555
-v49 control OK"
+B_MB=0; [ "$MBOX_D" != "-" ] && B_MB=1
+B_GL=0; [ "$GLK_D" != "-" ] && B_GL=1
+B_RS=0; [ "$RSD_D" != "-" ] && B_RS=1
+B_PS=0; [ "$PSCI_D" != "-" ] && B_PS=1
+B_GCC=0; [ "$GCC_D" != "-" ] && B_GCC=1
+B_EUD=0; [ "$EUD_D" != "-" ] && B_EUD=1
+B_RQ=0; [ "$RQ" = "Y" ] && B_RQ=1
+CHAIN="$B_MB$B_GL$B_RS$B_PS$B_GCC$B_EUD$B_RQ$CX"
 
-DEFER=$(cat /sys/kernel/debug/devices_deferred 2>/dev/null)
-DEFER="${DEFER//$'\t'/ }"
+# contador de deferidos (solo para la cabecera de la página dmesg)
 DFN=0
-while IFS= read -r l; do
-    [ -n "$l" ] && DFN=$((DFN+1))
-done <<EOF2
-$DEFER
-EOF2
-# -1 = no existe el fichero (debugfs sin montar); 0 = existe pero vacío
-[ -e /sys/kernel/debug/devices_deferred ] || DFN=-1
-# sublista relevante para la cadena RPM/reguladores/USB
-DFREL=$(printf '%s\n' "$DEFER" | grep -iE "rpm|smd|regulat|gdsc|usb|glink|mbox|apcs|clk|hsusb|dwc3|eud|psci" | head -30)
-DFRELN=0
-while IFS= read -r l; do
-    [ -n "$l" ] && DFRELN=$((DFRELN+1))
-done <<EOF3
-$DFREL
-EOF3
-P1=$(printf '%s\n%s\n' "P1 DFR tot=$DFN rel=$DFRELN" "$(printf '%s\n' "$DFREL" | wrap33 | firstlines 12)" | firstlines 13)
-[ -z "$P1" ] && P1="P1 BUILD-FAIL"
+if [ -e /sys/kernel/debug/devices_deferred ]; then
+    while IFS= read -r l; do
+        [ -n "$l" ] && DFN=$((DFN+1))
+    done < /sys/kernel/debug/devices_deferred
+else
+    DFN=-1
+fi
 
-# ── P2: booleans de la cadena + estado del glue ──
-GLUE2="?"
-[ -e /sys/kernel/dace_glue ] && read -r GLUE2 RET2 < /sys/kernel/dace_glue 2>/dev/null
-P2="P2 v49 CHAIN
-mb:$(yn $MBOX_D) gl:$(yn $GLK_D) rs:$(yn $RSD_D)
-ps:$(yn $PSCI_D) gcc:$(yn $GCC_D) eud:$(yn $EUD_D)
-rq:$RQ rpd:$RPDN girq:$GIRQ
-glue:$GLUE2 ${RET2:-?}"
-P2=$(printf '%s\n' "$P2" | firstlines 13)
-[ -z "$P2" ] && P2="P2 BUILD-FAIL"
+# ── única página de texto: dmesg filtrado ──
+DMF=$(dmesg 2>/dev/null | grep -iE "glink|rpm|smd|mbox|mailbox|psci|domain|genpd|defer|regulat|gdsc|proxy|eud|dwc3|oops|warn|fail" | tail -c 1100 | wrap33)
+P3=$(printf '%s\n%s\n' "dmesg DFR=$DFN cx=$CX" "$(printf '%s\n' "$DMF" | firstlines 12)" | firstlines 13)
+[ -z "$P3" ] && P3="dmesg vacio DFR=$DFN"
 
-# ── P3/P4: dmesg filtrado ──
-DMF=$(dmesg 2>/dev/null | grep -iE "glink|rpm|smd|mbox|mailbox|psci|domain|genpd|defer|regulat|gdsc|proxy|eud|dwc3|oops|warn" | tail -c 1100 | wrap33)
-P3=$(printf '%s\n%s\n' "P3 DMESG-1" "$(printf '%s\n' "$DMF" | firstlines 11)" | firstlines 13)
-[ -z "$P3" ] && P3="P3 BUILD-FAIL"
-P4=$(printf '%s\n%s\n' "P4 DMESG-2" "$(printf '%s\n' "$DMF" | skiplines 11 | firstlines 11)" | firstlines 13)
-[ -z "$P4" ] && P4="P4 BUILD-FAIL"
-
-info "dace-init: paginas v49 bytes P0=$(printf '%s' "$P0" | wc -c) P1=$(printf '%s' "$P1" | wc -c) P2=$(printf '%s' "$P2" | wc -c) P3=$(printf '%s' "$P3" | wc -c) P4=$(printf '%s' "$P4" | wc -c)"
+info "dace-init: v50 CHAIN=$CHAIN mb=$B_MB gl=$B_GL rs=$B_RS ps=$B_PS gcc=$B_GCC eud=$B_EUD rq=$B_RQ cx=$CX DFN=$DFN"
 # ── RONDA 2: hechos estructurales (franja 8 inferior = 1 → es la ronda 2) ──
 [ -d /sys/bus/platform/drivers/msm-dwc3 ] && C1=1 || C1=0
 C2=0
@@ -472,23 +436,14 @@ CODE_R2="$C1$C2$C3$C4$C5$C6$C7$C8"
 CODE2_R2="$D1$D2$D3$D4$D5$D6$D7$D8"
 info "dace-init: BARCODE R2 = $CODE_R2 $CODE2_R2"
 if [ "$BARCODE_OK" = "1" ]; then
-    # bucle: P0(control)→P1→P2→P3→P4 (16s c/u) → barcode R2 (8s) → R1 (8s)
-    if [ -e /sys/kernel/dace_text ]; then
-        while true; do
-            printf '%s\n' "$P0" > /sys/kernel/dace_text 2>/dev/null; sleep 16
-            printf '%s\n' "$P1" > /sys/kernel/dace_text 2>/dev/null; sleep 16
-            printf '%s\n' "$P2" > /sys/kernel/dace_text 2>/dev/null; sleep 16
-            printf '%s\n' "$P3" > /sys/kernel/dace_text 2>/dev/null; sleep 16
-            printf '%s\n' "$P4" > /sys/kernel/dace_text 2>/dev/null; sleep 16
-            echo "$CODE_R2 $CODE2_R2" > /sys/kernel/dace_barcode 2>/dev/null; sleep 8
-            echo "$CODE $CODE2" > /sys/kernel/dace_barcode 2>/dev/null; sleep 8
-        done
-    fi
+    # bucle v50: dmesg (14s) → R-chain (12s) → R1 (8s) → R2 (8s) = 42s
     while true; do
-        sleep 8
-        echo "$CODE_R2 $CODE2_R2" > /sys/kernel/dace_barcode 2>/dev/null
-        sleep 8
-        echo "$CODE $CODE2" > /sys/kernel/dace_barcode 2>/dev/null
+        [ -e /sys/kernel/dace_text ] && \
+            printf '%s\n' "$P3" > /sys/kernel/dace_text 2>/dev/null
+        sleep 14
+        echo "$CHAIN 10101010" > /sys/kernel/dace_barcode 2>/dev/null; sleep 12
+        echo "$CODE $CODE2" > /sys/kernel/dace_barcode 2>/dev/null; sleep 8
+        echo "$CODE_R2 $CODE2_R2" > /sys/kernel/dace_barcode 2>/dev/null; sleep 8
     done
 fi
 if [ "$BARCODE_OK" != "1" ] && [ -e /sys/kernel/dace_color ]; then
