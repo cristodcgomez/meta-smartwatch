@@ -200,27 +200,36 @@ serial="$(cat /proc/cmdline | sed 's/.*androidboot.serialno=//' | sed 's/ .*//')
 /usr/bin/adbd &
 stage 3 "adbd-launched" 0x00ff8000     # NARANJA: adbd lanzado
 
-    # ── v51: REBIND FORZADO de la cadena clk/gdsc/eud/glue ──
-    # Timing: aquí (tras modules+gadget+adbd) la cadena RPM ya tuvo tiempo de
-    # registrar VDD_CX (en v50 cx=1). Si se hace antes y el probe difiere, no
-    # hay más triggers de deferred-probe que lo reintenten.
-    # Evidencia v50: cx=1 (VDD_CX registrado), rq=1 (rpm_requests existe),
-    # "gcc_usb20_prim_gdsc: disabling" (USB3_GDSC se registró sin consumidor).
-    # Los recursos EXISTEN; los probes que difirieron pronto (antes de VDD_CX)
-    # no se reintentan (devices_deferred salió vacío). Forzamos el probe por
-    # sysfs bind en orden de dependencias. Si ya está bindeado, skip (no se
-    # toca lo que funciona; sin unbind).
-    RB="gcc-monaco:1410000.clock-controller gdsc:141c004.qcom,gdsc msm-eud:1610000.qcom,msm-eud msm-dwc3:4e00000.hsusb"
-    for pair in $RB; do
-        drv=${pair%%:*}; dev=${pair#*:}
-        if [ -e "/sys/bus/platform/devices/$dev/driver" ]; then
-            info "v51: $dev ya bindeado, skip"
-        else
-            echo "$dev" > "/sys/bus/platform/drivers/$drv/bind" 2>/dev/kmsg && \
-                info "v51: bind OK $drv <- $dev" || info "v51: bind FAIL $drv <- $dev"
-            sleep 1
+    # ── v52: REBIND FORZADO de la cadena rpmcc/gcc/gdsc/eud/glue ──
+    # v51 falló por nombre de device: el gcc se llama 1400000.clock-controller
+    # (dirección del REG, no el @1410000 del nodo), y faltaba rpmcc (bi_tcxo
+    # de gcc). v52 localiza cada device por COMPATIBLE (inmune a nombres) y
+    # bindea en orden de dependencias si no está ya bindeado.
+    trybind() { # $1=compatible $2=driver [$3=regulator-name opcional]
+        local d dev="" rc
+        for d in /sys/bus/platform/devices/*; do
+            [ -e "$d/of_node/compatible" ] || continue
+            grep -qa "$1" "$d/of_node/compatible" 2>/dev/null || continue
+            if [ -n "$3" ]; then
+                [ "$(cat "$d/of_node/regulator-name" 2>/dev/null)" = "$3" ] || continue
+            fi
+            dev="${d##*/}"
+        done
+        if [ -z "$dev" ]; then
+            info "v52: $1 device NO existe"; echo N; return
         fi
-    done
+        if [ -e "/sys/bus/platform/devices/$dev/driver" ]; then
+            info "v52: $dev ya bindeado"; echo Y; return
+        fi
+        echo "$dev" > "/sys/bus/platform/drivers/$2/bind" 2>/dev/kmsg; rc=$?
+        info "v52: bind $2 <- $dev rc=$rc"
+        echo "$rc"; sleep 1
+    }
+    RBCC=$(trybind "qcom,rpmcc-monaco" qcom-clk-smd-rpm)
+    RBGCC=$(trybind "qcom,monaco-gcc" gcc-monaco)
+    RBGD=$(trybind "qcom,gdsc" gdsc gcc_usb20_prim_gdsc)
+    RBEU=$(trybind "qcom,msm-eud" msm-eud)
+    RBGL=$(trybind "qcom,dwc-usb3-msm" msm-dwc3)
     sleep 2
 
 UDC=""
@@ -427,11 +436,18 @@ else
 fi
 
 # ── única página de texto: dmesg filtrado ──
-DMF=$(dmesg 2>/dev/null | grep -iE "glink|rpm|smd|mbox|mailbox|psci|domain|genpd|defer|regulat|gdsc|proxy|eud|dwc3|oops|warn|fail" | tail -c 1100 | wrap33)
-P3=$(printf '%s\n%s\n' "dmesg DFR=$DFN cx=$CX u3=$U3" "$(printf '%s\n' "$DMF" | firstlines 12)" | firstlines 13)
-[ -z "$P3" ] && P3="dmesg vacio DFR=$DFN"
+DEFER=$(cat /sys/kernel/debug/devices_deferred 2>/dev/null)
+DEFER="${DEFER//$'\t'/ }"
+DMF=$(dmesg 2>/dev/null | grep -iE "probe of|gcc|gdsc|clk|eud|dwc3|fail|error|warn|oops" | grep -viE "usb_f_|configfs" | tail -c 900 | wrap33)
+P3=$(cat <<EOFP3 | wrap33 | firstlines 13
+DFR=$DFN cc=$RBCC gcc=$RBGCC gd=$RBGD eu=$RBEU gl=$RBGL
+$DEFER
+$DMF
+EOFP3
+)
+[ -z "$P3" ] && P3="P3 vacio DFR=$DFN"
 
-info "dace-init: v51 CHAIN=$CHAIN mb=$MB gl=$GL rs=$RS gcc=$GCC eud=$EUD rq=$RQ cx=$CX u3=$U3 DFN=$DFN"
+info "dace-init: v52 CHAIN=$CHAIN mb=$MB gl=$GL rs=$RS gcc=$GCC eud=$EUD rq=$RQ cx=$CX u3=$U3 DFN=$DFN rb cc=$RBCC gcc=$RBGCC gd=$RBGD eu=$RBEU gl=$RBGL"
 # ── RONDA 2: hechos estructurales (franja 8 inferior = 1 → es la ronda 2) ──
 [ -d /sys/bus/platform/drivers/msm-dwc3 ] && C1=1 || C1=0
 C2=0
