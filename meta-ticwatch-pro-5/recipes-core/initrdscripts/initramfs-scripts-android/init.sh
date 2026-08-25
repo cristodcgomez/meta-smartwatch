@@ -200,6 +200,29 @@ serial="$(cat /proc/cmdline | sed 's/.*androidboot.serialno=//' | sed 's/ .*//')
 /usr/bin/adbd &
 stage 3 "adbd-launched" 0x00ff8000     # NARANJA: adbd lanzado
 
+    # ── v51: REBIND FORZADO de la cadena clk/gdsc/eud/glue ──
+    # Timing: aquí (tras modules+gadget+adbd) la cadena RPM ya tuvo tiempo de
+    # registrar VDD_CX (en v50 cx=1). Si se hace antes y el probe difiere, no
+    # hay más triggers de deferred-probe que lo reintenten.
+    # Evidencia v50: cx=1 (VDD_CX registrado), rq=1 (rpm_requests existe),
+    # "gcc_usb20_prim_gdsc: disabling" (USB3_GDSC se registró sin consumidor).
+    # Los recursos EXISTEN; los probes que difirieron pronto (antes de VDD_CX)
+    # no se reintentan (devices_deferred salió vacío). Forzamos el probe por
+    # sysfs bind en orden de dependencias. Si ya está bindeado, skip (no se
+    # toca lo que funciona; sin unbind).
+    RB="gcc-monaco:1410000.clock-controller gdsc:141c004.qcom,gdsc msm-eud:1610000.qcom,msm-eud msm-dwc3:4e00000.hsusb"
+    for pair in $RB; do
+        drv=${pair%%:*}; dev=${pair#*:}
+        if [ -e "/sys/bus/platform/devices/$dev/driver" ]; then
+            info "v51: $dev ya bindeado, skip"
+        else
+            echo "$dev" > "/sys/bus/platform/drivers/$drv/bind" 2>/dev/kmsg && \
+                info "v51: bind OK $drv <- $dev" || info "v51: bind FAIL $drv <- $dev"
+            sleep 1
+        fi
+    done
+    sleep 2
+
 UDC=""
 i=0
 echo 0x0080ffff > /sys/kernel/dace_color 2>/dev/null  # AZUL CLARO: esperando UDC (30s)
@@ -353,46 +376,45 @@ firstlines() {
         c=$((c+1))
     done
 }
-drv_of() { # $1 = device platform; driver bound o '-'
-    local d
-    d=$(readlink "/sys/bus/platform/devices/$1/driver" 2>/dev/null)
-    if [ -n "$d" ]; then echo "${d##*/}"; else echo "-"; fi
-}
 
-# ── hechos de la cadena RPM (bits del barcode R-chain) ──
-MBOX_D=$(drv_of f111000.mailbox)         # bit1 mb: qcom_apcs_ipc
-GLK_D=$(drv_of rpm-glink)                # bit2 gl: qcom_glink_rpm
-RSD_D=$(drv_of qcom,rpm-smd)             # bit3 rs: rpm-smd (platform)
-PSCI_D=$(drv_of psci)                    # bit4 ps: genpd psci/cluster-pd0
-GCC_D=$(drv_of 1410000.clock-controller) # bit5 gcc: gcc-monaco
-[ "$GCC_D" = "-" ] && GCC_D=$(drv_of soc:clock-controller)
-[ "$GCC_D" = "-" ] && for f in /sys/bus/platform/drivers/gcc-monaco/*; do
-    case "${f##*/}" in bind|unbind|module|uevent) ;; *) [ -e "$f" ] && GCC_D="${f##*/}" ;; esac
-done
-EUD_D=$(drv_of 1610000.qcom,msm-eud)     # bit6 eud: msm-eud
-[ "$EUD_D" = "-" ] && EUD_D=$(drv_of eud)
-[ "$EUD_D" = "-" ] && for f in /sys/bus/platform/drivers/msm-eud/*; do
-    case "${f##*/}" in bind|unbind|module|uevent) ;; *) [ -e "$f" ] && EUD_D="${f##*/}" ;; esac
-done
-RQ=N                                     # bit7 rq: existe rpmsg rpm_requests
+# ── hechos de la cadena v51 (bits del barcode R-chain) ──
+# v50: drv_of por nombre de device dio FALSOS NEGATIVOS (gl/rs/ps=0 con cx=1
+# y rq=1, que prueban que glink-rpm/rpm-smd funcionaron). El check robusto es
+# por DIRECTORIO DE DRIVER (¿hay algún device bindeado?), no por device name.
+drv_bound() { # $1 = nombre de driver platform; Y si tiene algún device bindeado
+    local f
+    for f in "/sys/bus/platform/drivers/$1/"*; do
+        case "${f##*/}" in bind|unbind|module|uevent) ;; *) [ -e "$f" ] && { echo Y; return; } ;; esac
+    done
+    echo N
+}
+MB=$(drv_bound qcom_apcs_ipc)   # bit1 mb: mailbox apcs
+GL=$(drv_bound qcom_glink_rpm)  # bit2 gl: glink-rpm
+RS=$(drv_bound rpm-smd)         # bit3 rs: rpm-smd (platform)
+GCC=$(drv_bound gcc-monaco)     # bit4 gcc: gcc-monaco
+EUD=$(drv_bound msm-eud)        # bit5 eud: msm-eud
+RQ=N                            # bit6 rq: rpmsg rpm_requests existe
 for f in /sys/bus/rpmsg/devices/*rpm_requests*; do
     [ -e "$f" ] && RQ=Y
 done
-CX=0                                     # bit8 cx: VDD_CX (pm5100_s1_level) registrado
+CX=0                            # bit7 cx: VDD_CX (pm5100_s1_level) registrado
+U3=0                            # bit8 u3: USB3_GDSC (gcc_usb20_prim_gdsc) registrado
 for rn in /sys/class/regulator/regulator*/name; do
     [ -e "$rn" ] || continue
     read -r nm < "$rn" 2>/dev/null
-    [ "$nm" = "pm5100_s1_level" ] && CX=1
+    case "$nm" in
+        pm5100_s1_level) CX=1 ;;
+        gcc_usb20_prim_gdsc) U3=1 ;;
+    esac
 done
 
-B_MB=0; [ "$MBOX_D" != "-" ] && B_MB=1
-B_GL=0; [ "$GLK_D" != "-" ] && B_GL=1
-B_RS=0; [ "$RSD_D" != "-" ] && B_RS=1
-B_PS=0; [ "$PSCI_D" != "-" ] && B_PS=1
-B_GCC=0; [ "$GCC_D" != "-" ] && B_GCC=1
-B_EUD=0; [ "$EUD_D" != "-" ] && B_EUD=1
-B_RQ=0; [ "$RQ" = "Y" ] && B_RQ=1
-CHAIN="$B_MB$B_GL$B_RS$B_PS$B_GCC$B_EUD$B_RQ$CX"
+B_MB=0; [ "$MB" = Y ] && B_MB=1
+B_GL=0; [ "$GL" = Y ] && B_GL=1
+B_RS=0; [ "$RS" = Y ] && B_RS=1
+B_GCC=0; [ "$GCC" = Y ] && B_GCC=1
+B_EUD=0; [ "$EUD" = Y ] && B_EUD=1
+B_RQ=0; [ "$RQ" = Y ] && B_RQ=1
+CHAIN="$B_MB$B_GL$B_RS$B_GCC$B_EUD$B_RQ$CX$U3"
 
 # contador de deferidos (solo para la cabecera de la página dmesg)
 DFN=0
@@ -406,10 +428,10 @@ fi
 
 # ── única página de texto: dmesg filtrado ──
 DMF=$(dmesg 2>/dev/null | grep -iE "glink|rpm|smd|mbox|mailbox|psci|domain|genpd|defer|regulat|gdsc|proxy|eud|dwc3|oops|warn|fail" | tail -c 1100 | wrap33)
-P3=$(printf '%s\n%s\n' "dmesg DFR=$DFN cx=$CX" "$(printf '%s\n' "$DMF" | firstlines 12)" | firstlines 13)
+P3=$(printf '%s\n%s\n' "dmesg DFR=$DFN cx=$CX u3=$U3" "$(printf '%s\n' "$DMF" | firstlines 12)" | firstlines 13)
 [ -z "$P3" ] && P3="dmesg vacio DFR=$DFN"
 
-info "dace-init: v50 CHAIN=$CHAIN mb=$B_MB gl=$B_GL rs=$B_RS ps=$B_PS gcc=$B_GCC eud=$B_EUD rq=$B_RQ cx=$CX DFN=$DFN"
+info "dace-init: v51 CHAIN=$CHAIN mb=$MB gl=$GL rs=$RS gcc=$GCC eud=$EUD rq=$RQ cx=$CX u3=$U3 DFN=$DFN"
 # ── RONDA 2: hechos estructurales (franja 8 inferior = 1 → es la ronda 2) ──
 [ -d /sys/bus/platform/drivers/msm-dwc3 ] && C1=1 || C1=0
 C2=0
