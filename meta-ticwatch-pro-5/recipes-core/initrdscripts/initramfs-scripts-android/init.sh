@@ -224,8 +224,10 @@ stage 3 "adbd-launched" 0x00ff8000     # NARANJA: adbd lanzado
             info "v53: $dev ya bindeado"; echo Y; return
         fi
         rm -f /tmp/rb_rc
+        # >/dev/null 2>&1: si el subshell hereda el stdout de la
+        # sustitución $(trybind ...), la retiene abierta y el timeout muere.
         ( echo "$dev" > "/sys/bus/platform/drivers/$2/bind" 2>/dev/kmsg
-          echo $? > /tmp/rb_rc ) &
+          echo $? > /tmp/rb_rc ) >/dev/null 2>&1 &
         pid=$!; t=0
         while [ "$t" -lt 12 ] && kill -0 "$pid" 2>/dev/null; do
             sleep 1; t=$((t+1))
@@ -249,7 +251,7 @@ UDC=""
 UDCBIND="?"
 i=0
 echo 0x0080ffff > /sys/kernel/dace_color 2>/dev/null  # AZUL CLARO: esperando UDC (30s)
-while [ $i -lt 30 ]; do
+while [ $i -lt 5 ]; do   # v54: 5s (el glue se bindea luego, en el bucle)
     UDC=$(cd /sys/class/udc 2>/dev/null && echo *)
     case "$UDC" in '*'|''|'.'|'..') UDC="" ;; esac
     [ -n "$UDC" ] && break
@@ -266,7 +268,7 @@ if [ -n "$UDC" ]; then
     echo 0x00ff00aa > /sys/kernel/dace_color 2>/dev/null  # ROSA: bind UDC en curso
     rm -f /tmp/udc_rc
     ( echo "$UDC" > /sys/kernel/config/usb_gadget/*/UDC 2>/dev/kmsg
-      echo $? > /tmp/udc_rc ) &
+      echo $? > /tmp/udc_rc ) >/dev/null 2>&1 &
     UDCPID=$!; j=0
     while [ "$j" -lt 15 ] && kill -0 "$UDCPID" 2>/dev/null; do
         sleep 1; j=$((j+1))
@@ -539,7 +541,7 @@ if [ "$BARCODE_OK" = "1" ]; then
                 echo 0x00ff00aa > /sys/kernel/dace_color 2>/dev/null  # ROSA
                 rm -f /tmp/udc_rc
                 ( echo "$UDC" > /sys/kernel/config/usb_gadget/*/UDC 2>/dev/kmsg
-                  echo $? > /tmp/udc_rc ) &
+                  echo $? > /tmp/udc_rc ) >/dev/null 2>&1 &
                 UDCPID=$!; j=0
                 while [ "$j" -lt 15 ] && kill -0 "$UDCPID" 2>/dev/null; do
                     sleep 1; j=$((j+1))
