@@ -1,0 +1,22 @@
+From: TicWatch Pro 5 port
+Subject: [PATCH] soc: qcom: minidump_log: dar tipo int a md_align_offset
+
+clang>=11 trata static md_align_offset; como implicit-int error.
+Se usa como int -> static int.
+
+Upstream-Status: Inappropriate [dace bring-up]
+---
+ drivers/soc/qcom/minidump_log.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/drivers/soc/qcom/minidump_log.c
++++ b/drivers/soc/qcom/minidump_log.c
+@@ -116,7 +116,7 @@
+ static bool md_in_oops_handler;
+ static atomic_t md_handle_done;
+ static struct seq_buf *md_runq_seq_buf;
+-static md_align_offset;
++static int md_align_offset;
+ 
+ /* CPU context information */
+ #ifdef CONFIG_QCOM_MINIDUMP_PANIC_CPU_CONTEXT

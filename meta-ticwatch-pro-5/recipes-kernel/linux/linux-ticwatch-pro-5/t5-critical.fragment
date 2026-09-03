@@ -17,15 +17,11 @@ CONFIG_USER_NS=y
 CONFIG_PID_NS=y
 CONFIG_IPC_NS=y
 
-# --- Consola VT: DESACTIVADA (alinear con el stock GKI) ---
-# El stock NO tiene VT/VT_CONSOLE/DUMMY_CONSOLE/FB/HW_CONSOLE (=n). Con
-# VT_CONSOLE=y y console=tty0 en el cmdline pero SIN un framebuffer real
-# (el SDE DRM no esta listo tan pronto), el kernel puede colgar
-# inicializando la consola virtual ANTES de init -> logo estatico. Aurora
-# usa VT para psplash, pero aurora tiene el cont-splash-fb patch y un DT
-# con el nodo; nosotros no. Desactivamos VT para el boot de rescate (adb
-# no necesita consola local). psplash se resolvera despues con el DT
-# adecuado, como aurora.
+# --- Consola VT: DESACTIVADA (revertido v61) ---
+# El intento v58 (VT+FB_SIMPLE+SYSFB+console=tty0) coincidió EXACTAMENTE
+# con la aparición del freeze del kernel ~25s tras init. Sin confirmación
+# de que efi-stub publica el framebuffer, fbcon cuelga (como advertía la
+# nota original). La telemetría dace_text/dace_color NO necesita fbcon.
 # CONFIG_VT is not set
 # CONFIG_VT_CONSOLE is not set
 # CONFIG_DUMMY_CONSOLE is not set

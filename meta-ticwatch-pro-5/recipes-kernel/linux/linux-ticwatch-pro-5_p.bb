@@ -24,17 +24,21 @@ COMPATIBLE_MACHINE = "ticwatch-pro-5"
 # vendor ramdisk (que va en vendor_boot) en el primer boot.
 # ═══════════════════════════════════════════════════════════════════════════
 SRC_URI = "git:///home/cristo/TICWATCH/google-eos-kernel;branch=halium-13.0;protocol=file \
+           git://android.googlesource.com/kernel/google-modules/bms;protocol=https;branch=android-msm-eos-5.15-tm-wear-kr3-dr-eos;name=bms;destsuffix=git-bms \
            file://t5-critical.fragment \
            file://eud-secure-fail-nonfatal.patch \
-           file://dwc3-msm-skip-deferred-extcon.patch \
-           file://dwc3-msm-probe-trace.patch \
+           file://slatecom-ssr-optional.patch \
+           file://minidump-int-type.patch \
            file://monaco-real.dtb \
            file://monacop.dtb \
            file://vendor-bootconfig \
-           file://usb_shim/google-extcon-usb-shim.c \
-           file://usb_shim/Kbuild \
            file://dace-bootcolor.py"
 SRCREV = "063840c5aae117bf0faac8b34fba0e37c9f619f8"
+# v57: pin del repo google-modules/bms (branch y SRCREV tomados de la receta
+# linux-aurora-modules; provee gvotable.h y logbuffer.h que <misc/gvotable.h>
+# requieren en drivers/power/supply/qcom/{smblite,pmic-voter-compat}.c).
+SRCREV_bms = "51583026f264e7597808a16aa6809fb9279eb8c4"
+SRCREV_FORMAT = "bms"
 
 LINUX_VERSION ?= "5.15.144"
 PV = "${LINUX_VERSION}+gki"
@@ -67,7 +71,7 @@ AR = "${LLVM_BIN}/llvm-ar"
 
 # ─── do_configure: merge gki + monaco_GKI + fragment; BTF off ───
 do_configure:prepend() {
-    # Boot-color debug + slatecom ssr_register condicional (inyecta en fuentes).
+    # Telemetría temporal de texto; slatecom ya se corrige con parche separado.
     python3 ${UNPACKDIR}/dace-bootcolor.py ${S}/init/main.c \
         ${S}/drivers/soc/qcom/slatecom_interface.c
     rm -f ${WORKDIR}/.config
@@ -156,28 +160,70 @@ do_install:append() {
     find ${D}/usr/src/ -name ..install.cmd -delete 2>/dev/null || true
 }
 
-# ─── Módulo externo google-extcon-usb-shim (CRÍTICO para adb) ───
-# El DT del monaco fuerza USB off en boot (modo otg + extcon sin driver →
-# dwc3-msm no registra UDC → no hay adb aunque el init corra). Este shim
-# (out-of-tree en google-modules/soc/msm) es el que aurora carga con
-# usb_force_disable_boot=0 para abrir la puerta USB. Se compila aquí (mismo
-# toolchain LLVM) y se empaqueta en el vendor ramdisk (do_deploy).
+# Charger externo: google-modules/bms (gvotable/logbuffer) + smblite.
 do_compile_kernelmodules:append() {
-    bbnote "Building google-extcon-usb-shim (externo)..."
-    mkdir -p ${B}/usb-shim-build
-    cp ${UNPACKDIR}/usb_shim/google-extcon-usb-shim.c ${B}/usb-shim-build/
-    cp ${UNPACKDIR}/usb_shim/Kbuild ${B}/usb-shim-build/
-    # Kbuild obj-m += google-extcon-usb-shim.o
+    # ── google-modules/bms — gvotable / logbuffer / qpnp-smblite-main ──
+    #
+    # El Makefile de drivers/power/supply/qcom espera:
+    #   -I<dir_de_kernel>/../google-modules/bms  (para <misc/gvotable.h>)
+    #   EXTRA_SYMBOLS = <build_dir>/../google-modules/bms/misc/Module.symvers
+    # Replicamos el layout hermano que usa linux-aurora-modules:
+    #   /workdir/google-modules/bms -> repo clonado (destsuffix=git-bms)
+    #   ${KDIR} = ${S} = ${WORKDIR}/git  →  ../google-modules/bms resuelve.
+    # Usamos UNPACKDIR (sources-unpack) porque WORKDIR/git-bms puede ser
+    # un residuo/caché corrupto (verificado: sources-unpack/git-bms tiene
+    # misc/ completo con gvotable.h; work-dir/git-bms está vacío/broken).
+    BMS=${UNPACKDIR}/git-bms
+    mkdir -p ${WORKDIR}/google-modules
+    ln -sfn ${BMS} ${WORKDIR}/google-modules/bms
+    # ⚠️ ${S} es un symlink al kernel real (work-shared/…/kernel-source).
+    # El Makefile del charger usa -I$(KERNEL_SRC)/../google-modules/bms y
+    # $(OUT_DIR)/../google-modules/bms/misc/Module.symvers; con symlink,
+    # "../" resuelve junto al DESTINO real (como descubrió aurora: crea sus
+    # symlinks hermanos junto a ${KDIR} en work-shared). Replicamos eso.
+    KSR=$(readlink -f ${S})
+    mkdir -p ${KSR}/../google-modules
+    ln -sfn ${BMS} ${KSR}/../google-modules/bms
+    BMSPATH="${KSR}/../google-modules/bms"
+
+    CC="${LLVM_BIN}/clang --target=aarch64-linux-gnu -fuse-ld=lld"
+    LD="${LLVM_BIN}/ld.lld"
+    AR="${LLVM_BIN}/llvm-ar"
+    NM="${LLVM_BIN}/llvm-nm"
+
+    # (1) gvotable + logbuffer: lives in bms/misc, builds standalone.
+    # Su Makefile es un WRAPPER que recursa con $(KERNEL_SRC) (default:
+    # kernel del HOST). Hay que pasar KERNEL_SRC/OUT_DIR como hace la
+    # receta linux-aurora-modules (ver su comentario KMOD_MAKE).
+    bbnote "Building gvotable + logbuffer from bms/misc ..."
     make -C ${S} O=${B} ARCH=arm64 LLVM=1 LLVM_IAS=1 \
-        CC="${LLVM_BIN}/clang --target=aarch64-linux-gnu -fuse-ld=lld" \
-        LD="${LLVM_BIN}/ld.lld" \
+        CC="$CC" LD="$LD" AR="$AR" NM="$NM" \
         CROSS_COMPILE=aarch64-linux-gnu- \
-        M=${B}/usb-shim-build modules 2>&1 | tee ${B}/usb-shim-build/build.log | tail -5
-    if [ -f ${B}/usb-shim-build/google-extcon-usb-shim.ko ]; then
-        bbnote "usb_shim.ko OK: $(stat -c%s ${B}/usb-shim-build/google-extcon-usb-shim.ko) bytes"
-    else
-        bbwarn "usb_shim.ko NO compilado (ver ${B}/usb-shim-build/build.log)"
-    fi
+        KERNEL_SRC=${KSR} OUT_DIR=${B} \
+        M=${BMS}/misc \
+        CONFIG_GOOGLE_VOTABLE=m CONFIG_GOOGLE_LOGBUFFER=m \
+        modules 2>&1 | tee ${B}/bms-misc-build/build.log | tail -8
+    [ -f "${BMS}/misc/gvotable.ko" ] || bbfatal "gvotable.ko NO compilado (ver ${B}/bms-misc-build/build.log)"
+
+    # (2) qpnp-smblite-main + qti-qbg-main: mismo patrón wrapper. Su Makefile
+    # ya añade solo: -I$(KERNEL_SRC)/../google-modules/bms (headers),
+    # KBUILD_OPTIONS con CONFIG_QPNP_SMBLITE/QTI_QBG=m, el define
+    # GOOGLE_DISABLE_SOFT_JEITA_INHIBIT_CHARGING y KBUILD_EXTRA_SYMBOLS
+    # desde $(OUT_DIR)/../google-modules/bms/misc/Module.symvers (existe
+    # tras paso 1 vía symlink). Los .ko caen junto a las fuentes.
+    bbnote "Building qpnp-smblite-main + qti-qbg-main (M=drivers/power/supply/qcom) ..."
+    make -C ${S} O=${B} ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+        CC="$CC" LD="$LD" AR="$AR" NM="$NM" \
+        CROSS_COMPILE=aarch64-linux-gnu- \
+        KERNEL_SRC=${KSR} OUT_DIR=${B} \
+        M=${S}/drivers/power/supply/qcom \
+        KBUILD_EXTRA_SYMBOLS="${BMSPATH}/misc/Module.symvers" \
+        KCFLAGS="-Wno-error -I${BMSPATH}" \
+        CONFIG_QPNP_SMBLITE=m CONFIG_QTI_QBG=m \
+        modules 2>&1 | tee ${B}/qcom-supply-build/build.log | tail -8
+    [ -f "${S}/drivers/power/supply/qcom/qpnp-smblite-main.ko" ] || bbfatal "qpnp-smblite-main.ko NO compilado (ver ${B}/qcom-supply-build/build.log)"
+
+    bbnote "BMS modules built: gvotable=$(ls ${BMS}/misc/*.ko 2>/dev/null | xargs -I{} basename {} | tr '\n' ' ') smblite=$(ls ${S}/drivers/power/supply/qcom/qpnp-smblite*.ko 2>/dev/null | xargs -I{} basename {} | tr '\n' ' ') qbg=$(ls ${S}/drivers/power/supply/qcom/qti-qbg*.ko 2>/dev/null | xargs -I{} basename {} | tr '\n' ' ')"
 }
 
 # ─── Ensamblado GKI 3 imágenes (como aurora-boot-images.bb) ───
@@ -210,6 +256,7 @@ do_deploy:append() {
     # El ABL selecciona el DTB por msm-id/board-id del hardware; sin el que
     # coincide (monacop) cae a EDL 05c6:900e (confirmado 22-08-2026).
     VEND=${B}/vendor-ramdisk
+    BMS=${UNPACKDIR}/git-bms
     rm -rf ${VEND} && mkdir -p ${VEND}/lib/modules
     # ── LAYOUT FLAT (estilo stock/aurora): los .ko van en /lib/modules/X.ko ──
     # El init first-stage de Android (binario ELF del stock, y nuestro init
@@ -224,11 +271,17 @@ do_deploy:append() {
         base=$(basename "$ko")
         cp "$ko" "${VEND}/lib/modules/$base"
     done
-    # usb_shim (externo, crítico para adb)
-    if [ -f ${B}/usb-shim-build/google-extcon-usb-shim.ko ]; then
-        cp ${B}/usb-shim-build/google-extcon-usb-shim.ko ${VEND}/lib/modules/
-        bbnote "usb_shim.ko añadido al vendor ramdisk"
-    fi
+    # Añadir los módulos bms (gvotable + logbuffer + smblite + qbg) al ramdisk.
+    # gvotable/logbuffer quedan junto a sus fuentes en ${BMS}/misc;
+    # qpnp-smblite-main/qti-qbg-main (build M= dentro del árbol) junto a las
+    # fuentes en ${S}/drivers/power/supply/qcom.
+    for f in gvotable logbuffer qpnp-smblite-main qti-qbg-main; do
+        for src in $(find ${BMS} ${S}/drivers/power/supply/qcom -maxdepth 3 -name "${f}.ko" 2>/dev/null); do
+            [ -f "$src" ] || continue
+            cp -n "$src" ${VEND}/lib/modules/ && \
+                bbnote "bms .ko añadido: $(basename $src)" || bbwarn "bms .ko NO copiado: $f"
+        done
+    done
     # strip debug de los .ko (como aurora; reduce tamaño y evita problemas)
     LLVM_STRIP=$(find ${STAGING_BINDIR_NATIVE} -name 'llvm-strip' | head -1)
     if [ -n "$LLVM_STRIP" ]; then
@@ -262,14 +315,27 @@ do_deploy:append() {
         fi
         rm -rf "${VEND}/lib/modules/${KREL}"
     fi
-    # modules.load: lista de todos los .ko (el first-stage los carga en orden)
-    ( cd ${VEND}/lib/modules && ls *.ko | sort > modules.load )
+    # modules.load: cadena USB/charger stock primero; el resto después.
+    # gvotable/logbuffer son dependencias del smblite fuera de árbol.
+    ( cd ${VEND}/lib/modules
+      {
+        for f in eud.ko usb_bam.ko phy-generic.ko phy-msm-snps-hs.ko dwc3-msm.ko gvotable.ko logbuffer.ko qpnp-smblite-main.ko qti-qbg-main.ko qti_battery_charger.ko; do
+            [ -f "$f" ] && echo "$f"
+        done
+        ls *.ko | grep -v -E '^(eud.ko|usb_bam.ko|phy-generic.ko|phy-msm-snps-hs.ko|dwc3-msm.ko|gvotable.ko|logbuffer.ko|qpnp-smblite-main.ko|qti-qbg-main.ko|qti_battery_charger.ko)$' | sort
+      } > modules.load
+    )
+    test -s ${VEND}/lib/modules/modules.load || bbfatal "modules.load vacío o no generado"
     cp ${VEND}/lib/modules/modules.load ${VEND}/lib/modules/modules.load.recovery 2>/dev/null || true
     bbnote "vendor ramdisk FLAT: $(ls ${VEND}/lib/modules/*.ko 2>/dev/null | wc -l) .ko en /lib/modules"
     ( cd ${VEND} && find . | sort | cpio -o -H newc --owner root:root 2>/dev/null ) > ${B}/vendor_rd.cpio
     gzip -9 -f ${B}/vendor_rd.cpio
-    # DTB blob = 2 dtbs concatenados (monaco-real + monacop) — igual que stock
-    cat ${UNPACKDIR}/monaco-real.dtb ${UNPACKDIR}/monacop.dtb > ${B}/dtb-blob-vendor.bin
+    # DTB blob stock: conserva extcon=<charger eud>, USB3_GDSC-supply y
+    # el estado original de smblite (okay) y QBG (disabled). Sin bypasses.
+    for dtb in monaco-real monacop; do
+        cp ${UNPACKDIR}/${dtb}.dtb ${B}/${dtb}-stock.dtb
+    done
+    cat ${B}/monaco-real-stock.dtb ${B}/monacop-stock.dtb > ${B}/dtb-blob-vendor.bin
     bbnote "DTB blob vendor_boot: $(stat -c%s ${B}/dtb-blob-vendor.bin) bytes (stock=572016)"
     "${MKBOOTIMG}" \
         --vendor_boot "${DEPLOYDIR}/${DISTRO}-${MACHINE}-vendor_boot.img" \

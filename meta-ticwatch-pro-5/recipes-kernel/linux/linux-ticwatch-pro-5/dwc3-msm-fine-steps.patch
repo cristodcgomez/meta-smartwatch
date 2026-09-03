@@ -1,0 +1,45 @@
+From: TicWatch Pro 5 port
+Subject: [PATCH] usb: dwc3: dwc3-msm: traza fina del probe (v61b, opcion1)
+
+Solo trazado: markers 13/14 (redriver) y 20/22 (regulador GDSC).
+Declara extern int dace_glue_step dentro de get_clk_gdsc (la variable
+se define mas abajo). No cambia comportamiento.
+Upstream-Status: Inappropriate [dace bring-up]
+---
+ drivers/usb/dwc3/dwc3-msm-core.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+--- a/drivers/usb/dwc3/dwc3-msm-core.c
+@@ -4491,13 +4491,16 @@
+ static int dwc3_msm_get_clk_gdsc(struct dwc3_msm *mdwc)
+ {
+ 	int ret;
++	extern volatile int dace_glue_step; /* definida mas abajo */
+ 
++	dace_glue_step = 20; /* antes del get GDSC */
+ 	mdwc->dwc3_gdsc = devm_regulator_get(mdwc->dev, "USB3_GDSC");
+ 	if (IS_ERR(mdwc->dwc3_gdsc)) {
+ 		if (PTR_ERR(mdwc->dwc3_gdsc) == -EPROBE_DEFER)
+ 			return PTR_ERR(mdwc->dwc3_gdsc);
+ 		mdwc->dwc3_gdsc = NULL;
+ 	}
++	dace_glue_step = 22;
+ 
+ 	mdwc->iface_clk = devm_clk_get(mdwc->dev, "iface_clk");
+ 	if (IS_ERR(mdwc->iface_clk)) {
+@@ -5658,12 +5661,14 @@
+ 	}
+ 
+ 	/* redriver may not probe, check it at start here */
++	dace_glue_step = 13;
+ 	mdwc->redriver = usb_get_redriver_by_phandle(node, "ssusb_redriver", 0);
+ 	if (IS_ERR(mdwc->redriver)) {
+ 		ret = PTR_ERR(mdwc->redriver);
+ 		mdwc->redriver = NULL;
+ 		goto err;
+ 	}
++	dace_glue_step = 14;
+ 
+ 	/* Get all clks and gdsc reference */
+ 	ret = dwc3_msm_get_clk_gdsc(mdwc);
+

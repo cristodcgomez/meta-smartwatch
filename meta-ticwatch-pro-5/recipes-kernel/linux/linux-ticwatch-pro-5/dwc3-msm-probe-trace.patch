@@ -20,7 +20,7 @@ Upstream-Status: Inappropriate [dace bring-up]
  }
  
 +/* dace trace: paso actual del probe del glue (0 = probe nunca llamado) */
-+int dace_glue_step = 0;
++volatile int dace_glue_step = 0;
 +int dace_glue_ret = 0;
 +
 +#include <linux/sysfs.h>

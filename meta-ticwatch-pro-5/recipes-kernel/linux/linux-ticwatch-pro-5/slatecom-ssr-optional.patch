@@ -1,0 +1,19 @@
+From: TicWatch Pro 5 port
+Subject: [PATCH] soc: qcom: make slatecom SSR registration optional
+
+Avoid a built-in link dependency on modular QCOM_RPROC_COMMON.
+Upstream-Status: Inappropriate [configuration-specific]
+---
+--- a/drivers/soc/qcom/slatecom_interface.c
++++ b/drivers/soc/qcom/slatecom_interface.c
+@@ -1277,6 +1277,10 @@
+ {
+ 	int i;
+ 
++	/* qcom_register_ssr_notifier only exists when its provider is built-in. */
++	if (!IS_BUILTIN(CONFIG_QCOM_RPROC_COMMON))
++		return;
++
+ 	for (i = 0; i < ARRAY_SIZE(service_data); i++) {
+ 		if ((service_data[i].domain_id < 0) ||
+ 				(service_data[i].domain_id >= SSR_DOMAIN_MAX)) {
