@@ -5,15 +5,40 @@ Expone el paso exacto del probe del core dwc3 (built-in) en
 /sys/kernel/dace_core (paso + errno; bit 0x40 = salio por error) para
 localizar el bloqueo D0 sin UART: 1=entry 2=ioremap 3=clk 4=is_valid
 5=drvdata 6=core_init 7=get_phy 8=phy_init 9=soft_reset 10=core_init ok
-11=core_init_mode 12=gadget_init ok 13=success. El sysfs se crea con
-late_initcall (el core es built-in) para existir aunque el probe no corra.
+11=core_init_mode 12=gadget_init ok 13=success. Declaraciones al inicio
+del fichero (los usos aparecen en dwc3_core_init antes de dwc3_probe).
 Sin cambios funcionales.
 
 Upstream-Status: Inappropriate [dace bring-up]
 ---
 --- a/drivers/usb/dwc3/core.c
 +++ b/drivers/usb/dwc3/core.c
-@@ -1054,6 +1054,7 @@
+@@ -37,6 +37,24 @@
+ #include "io.h"
+ 
+ #include "debug.h"
++
++#include <linux/sysfs.h>
++#include <linux/kobject.h>
++/* dace trace: paso del probe del core dwc3 (0 = probe nunca llamado) */
++volatile int dace_core_step;
++int dace_core_ret;
++static ssize_t dace_core_show(struct kobject *k, struct kobj_attribute *a,
++			      char *buf)
++{
++	return sprintf(buf, "%d %d\n", dace_core_step, dace_core_ret);
++}
++static struct kobj_attribute dace_core_attr =
++	__ATTR(dace_core, 0444, dace_core_show, NULL);
++static int __init dace_core_sysfs_init(void)
++{
++	return sysfs_create_file(kernel_kobj, &dace_core_attr.attr);
++}
++late_initcall(dace_core_sysfs_init);
+ 
+ #define DWC3_DEFAULT_AUTOSUSPEND_DELAY	5000 /* ms */
+ 
+@@ -1054,6 +1072,7 @@
  		if (ret)
  			goto err0a;
  		dwc->phys_ready = true;
@@ -21,7 +46,7 @@ Upstream-Status: Inappropriate [dace bring-up]
  	}
  
  	usb_phy_init(dwc->usb2_phy);
-@@ -1067,10 +1068,12 @@
+@@ -1067,10 +1086,12 @@
  		phy_exit(dwc->usb2_generic_phy);
  		goto err0a;
  	}
@@ -34,7 +59,7 @@ Upstream-Status: Inappropriate [dace bring-up]
  
  	if (hw_mode == DWC3_GHWPARAMS0_MODE_DRD &&
  	    !DWC3_VER_IS_WITHIN(DWC3, ANY, 194A)) {
-@@ -1228,6 +1231,8 @@
+@@ -1228,6 +1249,8 @@
  	dwc3_ulpi_exit(dwc);
  
  err0:
@@ -43,7 +68,7 @@ Upstream-Status: Inappropriate [dace bring-up]
  	return ret;
  }
  
-@@ -1290,6 +1295,7 @@
+@@ -1290,6 +1313,7 @@
  {
  	struct device *dev = dwc->dev;
  	int ret;
@@ -51,7 +76,7 @@ Upstream-Status: Inappropriate [dace bring-up]
  
  	switch (dwc->dr_mode) {
  	case USB_DR_MODE_PERIPHERAL:
-@@ -1301,8 +1307,12 @@
+@@ -1301,8 +1325,12 @@
  		phy_set_mode(dwc->usb3_generic_phy, PHY_MODE_USB_DEVICE);
  
  		ret = dwc3_gadget_init(dwc);
@@ -65,33 +90,7 @@ Upstream-Status: Inappropriate [dace bring-up]
  		break;
  	case USB_DR_MODE_HOST:
  		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_HOST);
-@@ -1610,6 +1620,25 @@
- 	}
- }
- 
-+/* dace trace: paso del probe del core dwc3 (0 = probe nunca llamado) */
-+volatile int dace_core_step;
-+int dace_core_ret;
-+
-+#include <linux/sysfs.h>
-+#include <linux/kobject.h>
-+static ssize_t dace_core_show(struct kobject *k, struct kobj_attribute *a,
-+			      char *buf)
-+{
-+	return sprintf(buf, "%d %d\n", dace_core_step, dace_core_ret);
-+}
-+static struct kobj_attribute dace_core_attr =
-+	__ATTR(dace_core, 0444, dace_core_show, NULL);
-+static int __init dace_core_sysfs_init(void)
-+{
-+	return sysfs_create_file(kernel_kobj, &dace_core_attr.attr);
-+}
-+late_initcall(dace_core_sysfs_init);
-+
- static int dwc3_probe(struct platform_device *pdev)
- {
- 	struct device		*dev = &pdev->dev;
-@@ -1627,6 +1656,7 @@
+@@ -1627,6 +1655,7 @@
  
  	dwc = &vdwc->dwc;
  	dwc->dev = dev;
@@ -99,7 +98,7 @@ Upstream-Status: Inappropriate [dace bring-up]
  
  	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
  	if (!res) {
-@@ -1648,8 +1678,13 @@
+@@ -1648,8 +1677,13 @@
  	dwc_res.start += DWC3_GLOBALS_REGS_START;
  
  	regs = devm_ioremap_resource(dev, &dwc_res);
@@ -115,7 +114,7 @@ Upstream-Status: Inappropriate [dace bring-up]
  
  	dwc->regs	= regs;
  	dwc->regs_size	= resource_size(&dwc_res);
-@@ -1662,8 +1697,11 @@
+@@ -1662,8 +1696,11 @@
  
  	if (dev->of_node) {
  		ret = devm_clk_bulk_get_all(dev, &dwc->clks);
@@ -128,7 +127,7 @@ Upstream-Status: Inappropriate [dace bring-up]
  		/*
  		 * Clocks are optional, but new DT platforms should support all
  		 * clocks as required by the DT-binding.
-@@ -1682,6 +1720,7 @@
+@@ -1682,6 +1719,7 @@
  	ret = clk_bulk_prepare_enable(dwc->num_clks, dwc->clks);
  	if (ret)
  		goto assert_reset;
@@ -136,7 +135,7 @@ Upstream-Status: Inappropriate [dace bring-up]
  
  	if (!dwc3_core_is_valid(dwc)) {
  		dev_err(dwc->dev, "this is not a DesignWare USB3 DRD Core\n");
-@@ -1690,7 +1729,9 @@
+@@ -1690,7 +1728,9 @@
  	}
  
  	platform_set_drvdata(pdev, dwc);
@@ -146,7 +145,7 @@ Upstream-Status: Inappropriate [dace bring-up]
  
  	if (!dwc->sysdev_is_parent &&
  	    DWC3_GHWPARAMS0_AWIDTH(dwc->hwparams.hwparams0) == 64) {
-@@ -1725,11 +1766,13 @@
+@@ -1725,11 +1765,13 @@
  	if (ret)
  		goto err3;
  
@@ -160,7 +159,7 @@ Upstream-Status: Inappropriate [dace bring-up]
  
  	dwc3_check_params(dwc);
  	dwc3_debugfs_init(dwc);
-@@ -1742,6 +1785,7 @@
+@@ -1742,6 +1784,7 @@
  
  	dma_set_max_seg_size(dev, UINT_MAX);
  
@@ -168,7 +167,7 @@ Upstream-Status: Inappropriate [dace bring-up]
  	return 0;
  
  err5:
-@@ -1779,6 +1823,8 @@
+@@ -1779,6 +1822,8 @@
  	if (dwc->usb_psy)
  		power_supply_put(dwc->usb_psy);
  

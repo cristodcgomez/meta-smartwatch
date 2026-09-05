@@ -8,7 +8,7 @@ dace_status() {
     c=$(cat "$DC" 2>/dev/null)
     g=$(cat "$DG" 2>/dev/null)
     if [ -w /sys/kernel/dace_text ]; then
-        printf '\n\n\n\n\nCORE %s\nGLUE %s\n%s\n' "${c:-?}" "${g:-?}" "$*" > /sys/kernel/dace_text 2>/dev/null
+        printf '\n\nCORE %s\nGLUE %s\n' "${c:-?}" "${g:-?}" > /sys/kernel/dace_text 2>/dev/null
     fi
     log "core=${c:-?} glue=${g:-?} $*"
 }
