@@ -1,235 +1,179 @@
-#! /bin/sh
-
-. /machine.conf
-
-# Log to /dev/kmsg (printk ring buffer) rather than /dev/ttyprintk:
-# this kernel has CONFIG_TTY_PRINTK=n (gki_defconfig default), so the
-# ttyprintk node never exists and every info() was silently dropped.
-# /dev/kmsg is provided by CONFIG_PRINTK + printk.devkmsg=on (set on
-# our cmdline), so it's available as soon as devtmpfs is mounted.
-info() { echo "init: $1" > /dev/kmsg 2>/dev/null; }
-fail() {
-    echo "init: Failed" > /dev/kmsg 2>/dev/null
-    echo "init: $1" > /dev/kmsg 2>/dev/null
-    echo "init: Waiting for 15 seconds before rebooting ..." > /dev/kmsg 2>/dev/null
-    sleep 15s; reboot
+#!/bin/sh
+# v70: stock USB bring-up; reader mode is an explicit build-time choice.
+DACE_MODE=usb
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+DC=/sys/kernel/dace_core
+DG=/sys/kernel/dace_glue
+dace_status() {
+    c=$(cat "$DC" 2>/dev/null)
+    g=$(cat "$DG" 2>/dev/null)
+    if [ -w /sys/kernel/dace_text ]; then
+        printf '\n\nCORE %s\nGLUE %s\n' "${c:-?}" "${g:-?}" > /sys/kernel/dace_text 2>/dev/null
+    fi
+    log "core=${c:-?} glue=${g:-?} $*"
 }
+export PATH
+mkdir -p /proc /sys /dev /tmp
+LOG=/tmp/dace-init.log
+: > "$LOG"
+mount -t proc proc /proc >> "$LOG" 2>&1
+mount -t sysfs sysfs /sys >> "$LOG" 2>&1
+mount -t devtmpfs devtmpfs /dev >> "$LOG" 2>&1
+mkdir -p /dev/pts /sys/kernel/config /sys/fs/pstore /dev/usb-ffs/adb
+mount -t devpts devpts /dev/pts >> "$LOG" 2>&1
 
-setup_devtmpfs() {
-    mount -t devtmpfs -o mode=0755,nr_inodes=0 devtmpfs $1/dev
-    mkdir $1/dev/pts
-    mount -t devpts none $1/dev/pts/
-    test -c $1/dev/fd     || ln -sf /proc/self/fd $1/dev/fd
-    test -c $1/dev/stdin  || ln -sf fd/0 $1/dev/stdin
-    test -c $1/dev/stdout || ln -sf fd/1 $1/dev/stdout
-    test -c $1/dev/stderr || ln -sf fd/2 $1/dev/stderr
-    test -c $1/dev/socket || mkdir -m 0755 $1/dev/socket
+log() {
+    printf 'dace-v70: %s\n' "$*" >> "$LOG"
+    if [ -c /dev/kmsg ]; then
+        printf '<6>dace-v70: %s\n' "$*" > /dev/kmsg 2>/dev/null
+    fi
+    return 0
 }
-
-info "Mounting relevant filesystems ..."
-mkdir -m 0755 /proc;  mount -t proc proc /proc
-mkdir -m 0755 /sys;   mount -t sysfs sys /sys
-mkdir -p /dev;        setup_devtmpfs ""
-
-# ---- DACE-SPECIFIC: load the vendor module chain ----
-# Our 85+ SoC modules are =m. Load them now so /dev/mmcblk0pN appears,
-# the WLAN/sensor/audio drivers are ready, etc.
-#
-# vendor_kernel_boot ships .ko's at a FLAT /lib/modules/*.ko (no
-# $(uname -r) subdirectory). busybox modprobe DOES expect /lib/modules/$(uname
-# -r)/{modules.dep,*.ko}, so we symlink the version subdir to the flat root.
-# modules.dep is already at /lib/modules/modules.dep (shipped by VKB) and
-# contains absolute paths like "/lib/modules/clk-qcom.ko" -- those resolve
-# directly, the symlink only exists so modprobe's chdir() lands in the right
-# place to load modules.dep.
-#
-# With modprobe + modules.dep, dep order in modules.load.dace is IRRELEVANT
-# -- modprobe walks the dep tree per module. This matters because hand-ordering
-# 96 modules across all SoC subsystems is fragile.
-KREL=$(uname -r)
-[ ! -e "/lib/modules/$KREL" ] && ln -sf . "/lib/modules/$KREL"
-
-# Pre-load the google-extcon-usb-shim with usb_force_disable_boot=0 BEFORE the
-# bulk modprobe loop. The DT default has the shim force-disabling USB at boot
-# ("disable-param:0x1" in dmesg) which keeps dwc3-msm from registering a UDC --
-# no UDC, no adb. We can't rely on /etc/modprobe.d/*.conf because the busybox
-# modprobe in our initramfs doesn't honor it. Passing the param directly to
-# modprobe IS honored.
-info "Pre-loading google-extcon-usb-shim with USB gate forced open ..."
-modprobe google-extcon-usb-shim usb_force_disable_boot=0 2>/dev/kmsg
-
-info "Loading dace kernel modules from /etc/modules.load.dace ..."
-while read mod; do
-    case "$mod" in ''|\#*) continue ;; esac
-    modprobe "${mod%.ko}" 2>/dev/kmsg
-done < /etc/modules.load.dace
-info "Loaded dace kernel modules: $(ls /sys/bus/platform/drivers/ 2>/dev/null | wc -l) platform drivers registered"
-
-# Belt-and-braces: even with usb_force_disable_boot=0 the shim may have latched
-# the gate via DT before our param applied. The runtime sysfs attr
-# `force_disable` is changeable -- write 0 to flip USB on.
-for fd in /sys/devices/platform/soc/soc:extcon_usb_shim/force_disable \
-          /sys/bus/platform/devices/soc:extcon_usb_shim/force_disable; do
-    [ -e "$fd" ] && echo 0 > "$fd" 2>/dev/kmsg && info "USB gate opened via $fd"
+run() {
+    "$@" >> "$LOG" 2>&1
+    RUN_RC=$?
+    [ "$RUN_RC" -eq 0 ] || log "rc=$RUN_RC: $*"
+    return "$RUN_RC"
+}
+put() {
+    { printf '%s\n' "$2" > "$1"; } 2>> "$LOG"
+    PUT_RC=$?
+    [ "$PUT_RC" -eq 0 ] || log "write rc=$PUT_RC: $1"
+    return "$PUT_RC"
+}
+mounted() { grep -Fq " $1 $2 " /proc/mounts; }
+log "mode=$DACE_MODE kernel=$(uname -r)"
+log "cmdline=$(cat /proc/cmdline)"
+mkdir -p /tmp/pstore
+PS_RC=0
+if ! mounted /sys/fs/pstore pstore; then
+    run mount -t pstore pstore /sys/fs/pstore
+    PS_RC=$?
+fi
+for psfile in /sys/fs/pstore/*; do
+    [ -f "$psfile" ] && run cp "$psfile" /tmp/pstore/
 done
 
-# Cache cmdline contents while /proc is still mounted. The proc/sys move
-# (umount -l /proc, mount -t proc proc $BOOT_DIR/proc) happens before
-# switch_root, so any LATER `grep /proc/cmdline` would fail.
-CMDLINE=$(cat /proc/cmdline 2>/dev/null)
-
-# Checks whether we need to start adbd for interactive debugging
-case "$CMDLINE" in *debug-ramdisk*) DEBUG_RAMDISK=1 ;; *) DEBUG_RAMDISK=0 ;; esac
-if [ "$DEBUG_RAMDISK" = "1" ]; then
-    # On this 5.15 GKI kernel CONFIG_USB_F_FS=y but functionfs_init() is NOT a
-    # fs_initcall -- f_fs.c's filesystem registration happens lazily when
-    # _ffs_alloc_dev sees its first device (configfs mkdir functions/ffs.X). So
-    # `mount -t functionfs` only works AFTER we've created an ffs.X function
-    # via configfs.
-    #
-    # android-gadget-setup adb does that for us, but its first line is `cd
-    # /sys/kernel/config/usb_gadget` so it REQUIRES configfs to be mounted.
-    # systemd auto-mounts it in the rootfs but we're pre- systemd in the
-    # initramfs -- do it ourselves.
-    mkdir -p /sys/kernel/config
-    mount -t configfs none /sys/kernel/config 2>/dev/null || true
-
-    # android-gadget-setup adb creates the configfs gadget, the
-    # functions/ffs.usb0 function (which triggers functionfs_init() and
-    # registers the `functionfs` fs type), AND mounts it at /dev/usb-ffs/adb.
-    # We don't need a separate mount call.
-    /usr/bin/android-gadget-setup adb
-
-    # Legacy /sys/class/android_usb writes -- silently no-op on our 5.15 GKI
-    # kernel which doesn't have CONFIG_USB_ANDROID. Kept for parity with the
-    # upstream init.sh.
-    echo 0 > /sys/class/android_usb/android0/enable 2>/dev/null
-    echo 18d1 > /sys/class/android_usb/android0/idVendor 2>/dev/null
-    echo d002 > /sys/class/android_usb/android0/idProduct 2>/dev/null
-    echo adb > /sys/class/android_usb/android0/f_ffs/aliases 2>/dev/null
-    echo ffs > /sys/class/android_usb/android0/functions 2>/dev/null
-    echo AsteroidOS > /sys/class/android_usb/android0/iManufacturer 2>/dev/null
-    echo InitRamDisk > /sys/class/android_usb/android0/iProduct 2>/dev/null
-    serial="$(sed 's/.*androidboot.serialno=//;s/ .*//' /proc/cmdline)"
-    echo "$serial" > /sys/class/android_usb/android0/iSerial 2>/dev/null
-    echo 1 > /sys/class/android_usb/android0/enable 2>/dev/null
-
-    /usr/bin/adbd &
-
-    # Bind to the first available UDC -- writing the UDC name into
-    # configfs/usb_gadget/<g>/UDC is what makes the USB device visible to the
-    # host. dwc3-msm probes via deferred-init module load (it's =m, loaded from
-    # modules.load.dace after sdhci-msm), so the UDC appears 2-10s into boot.
-    # Poll up to 30s in 0.5s steps and verify an entry actually exists in
-    # /sys/class/udc/.
-    info "adbd: usb_gadget=$(cd /sys/kernel/config/usb_gadget 2>/dev/null && echo *)"
-    UDC=""
-    i=0
-    while [ $i -lt 30 ]; do
-        UDC=$(cd /sys/class/udc 2>/dev/null && echo *)
-        case "$UDC" in '*'|''|'.'|'..') UDC="" ;; esac
-        [ -n "$UDC" ] && break
-        sleep 1
-        i=$((i+1))
+if [ "$DACE_MODE" = forensic ]; then
+    dmesg > /tmp/reader-dmesg.txt 2>> "$LOG"
+    : > /tmp/reader-text.txt
+    for psfile in /tmp/pstore/console-*; do
+        [ -f "$psfile" ] && cat "$psfile" >> /tmp/reader-text.txt
     done
-    if [ -n "$UDC" ]; then
-        UDC=$(echo "$UDC" | awk '{print $1}')
-        info "adbd: found UDC=$UDC after $((i+1))s"
-        if echo "$UDC" > /sys/kernel/config/usb_gadget/adb/UDC 2>/dev/kmsg; then
-            info "adbd: bound UDC=$UDC successfully"
-        else
-            info "adbd: bind to $UDC FAILED (write error)"
-        fi
-    else
-        info "adbd: NO UDC found after 30s -- dwc3-msm gate still off?"
-        info "adbd: /sys/class/udc entries = '$(cd /sys/class/udc 2>/dev/null && echo *)'"
+    if [ ! -s /tmp/reader-text.txt ]; then
+        printf 'NO CONSOLE\nmount rc=%s\n%s\n' "$PS_RC" "$(uname -r)" > /tmp/reader-text.txt
+        grep -iE 'pstore|ramoops|persistent_ram' /tmp/reader-dmesg.txt >> /tmp/reader-text.txt
+        ls -l /tmp/pstore >> /tmp/reader-text.txt 2>&1
     fi
-
-    # debug-ramdisk is a sticky mode: stay in the initramfs forever with adb up.
-    # The user flips it on to investigate boot failures and doesn't want
-    # switch_root to free our adbd out from under them.
-    info "debug-ramdisk: staying in initramfs (adb available); never switching to rootfs"
+    cut -c1-36 /tmp/reader-text.txt > /tmp/reader-pages.txt
+    lines=$(wc -l < /tmp/reader-pages.txt)
+    pages=$(( (lines + 5) / 6 )); [ "$pages" -gt 0 ] || pages=1
+    page=1
+    while true; do
+        first=$(( (page - 1) * 6 + 1 ))
+        text=$(sed -n "${first},$((first + 5))p" /tmp/reader-pages.txt)
+        if [ -w /sys/kernel/dace_text ]; then
+            printf 'ps %s/%s\n\n\n%s\n' "$page" "$pages" "$text" > /sys/kernel/dace_text
+        fi
+        sleep 12
+        page=$(( page % pages + 1 ))
+    done
+fi
+if [ "$DACE_MODE" != usb ]; then
+    log "invalid mode; stopped safely"
     while true; do sleep 3600; done
 fi
 
-rotation=0
-[ -e /etc/rotation ] && read rotation < /etc/rotation
-[ -x /usr/bin/msm-fb-refresher ] && /usr/bin/msm-fb-refresher
-/usr/bin/psplash --angle $rotation --no-console-switch &
-
-info "Mounting sdcard..."
-mkdir -m 0777 /sdcard /loop
-while [ ! -e /dev/$sdcard_partition ] ; do
-    info "Waiting for $sdcard_partition..."
-    sleep 1
+load_mod() {
+    mod_path=$1
+    mod_name=${mod_path##*/}; mod_name=${mod_name%.ko}
+    mod_sys=$(printf '%s' "$mod_name" | tr '-' '_')
+    [ -d "/sys/module/$mod_sys" ] && return 0
+    [ -f "$mod_path" ] || { log "missing module $mod_path"; return 1; }
+    insmod "$mod_path" > /tmp/insmod-last.err 2>&1
+    mod_rc=$?
+    if [ "$mod_rc" -ne 0 ]; then
+        log "insmod $mod_name rc=$mod_rc"
+        cat /tmp/insmod-last.err >> "$LOG"
+        head -n 3 /tmp/insmod-last.err | while IFS= read -r errline; do log "$mod_name: $errline"; done
+    fi
+    return "$mod_rc"
+}
+if [ -f /lib/modules/modules.load ]; then
+    while IFS= read -r module || [ -n "$module" ]; do
+        case "$module" in ''|\#*) continue ;; esac
+        load_mod "/lib/modules/$module"
+    done < /lib/modules/modules.load
+else
+    log 'missing modules.load'
+fi
+for module in eud.ko usb_bam.ko phy-generic.ko phy-msm-snps-hs.ko \
+              dwc3-msm.ko qpnp-smblite-main.ko qti_battery_charger.ko; do
+    load_mod "/lib/modules/$module"
 done
+for pass in 1 2; do
+    for module in /lib/modules/*.ko; do load_mod "$module"; done
+done
+log 'module loading complete'
 
-/sbin/fsck.ext4 -p /dev/$sdcard_partition
-mount -t auto -o rw,noatime,nodiratime /dev/$sdcard_partition /sdcard
-[ $? -eq 0 ] || fail "Failed to mount the sdcard. Cannot continue."
-
-info "Checking for loop rootfs image on the sdcard..."
-ANDROID_MEDIA_DIR="/sdcard/media/"
-[ -d /sdcard/media/0 ]            && ANDROID_MEDIA_DIR="/sdcard/media/0"
-[ -e /sdcard/asteroidos.ext4 ]    && ANDROID_MEDIA_DIR="/sdcard/"
-
-BOOT_DIR="/sdcard"
-if [ -e $ANDROID_MEDIA_DIR/asteroidos.ext4 ] ; then
-    /sbin/fsck.ext4 -p $ANDROID_MEDIA_DIR/asteroidos.ext4
-    info "Rootfs image found at $ANDROID_MEDIA_DIR/asteroidos.ext4; mounting it now ..."
-    mount -o noatime,nodiratime,sync,rw,loop $ANDROID_MEDIA_DIR/asteroidos.ext4 /loop
-    [ $? -ne 0 ] || BOOT_DIR="/loop"
-fi
-
-if [ ! -e $system_partition ] && [ -n "$system_partition" ] ; then
-    info "Mounting system..."
-    mkdir -m 0777 $BOOT_DIR/system
-    mount -t auto -o ro /dev/$system_partition $BOOT_DIR/system
-    mount --bind $BOOT_DIR/system /system
-fi
-
-if [ ! -e $vendor_partition ] && [ -n "$vendor_partition" ] ; then
-    info "Mounting vendor..."
-    mkdir -m 0777 $BOOT_DIR/vendor
-    mount -t auto -o ro /dev/$vendor_partition $BOOT_DIR/vendor
-    mount --bind $BOOT_DIR/vendor /vendor
-fi
-
-if [ ! -e $firmware_partition ] && [ -n "$firmware_partition" ] ; then
-    info "Mounting firmware..."
-    mkdir -m 0777 $BOOT_DIR/firmware
-    mount -t auto -o ro /dev/$firmware_partition $BOOT_DIR/firmware
-    mount --bind $BOOT_DIR/firmware /firmware
-fi
-
-if [ -x /init.machine ]; then
-    info "Run machine specific init"
-    /init.machine $BOOT_DIR > /dev/kmsg 2>&1 || true
-fi
-
-setup_devtmpfs $BOOT_DIR
-
-info "Move the /proc and /sys filesystems..."
-umount -l /proc
-umount -l /sys
-mount -t proc proc $BOOT_DIR/proc
-mount -t sysfs sys $BOOT_DIR/sys
-mount -t tmpfs run $BOOT_DIR/run
-
-echo FIFO $BOOT_DIR/run > /run/psplash_fifo
-sleep 1
-
-# Safety net: if BOOT_DIR's systemd doesn't exist, don't even try
-# switch_root -- it would fail exec("..."), PID 1 would exit, and the
-# kernel would panic ("Attempted to kill init"). Instead, stay alive
-# in the initramfs so adb (debug-ramdisk) can be used to investigate.
-if [ ! -x "$BOOT_DIR/lib/systemd/systemd" ]; then
-    info "FATAL: $BOOT_DIR/lib/systemd/systemd missing or not executable!"
-    info "BOOT_DIR=$BOOT_DIR  -- staying in initramfs for adb debugging."
-    info "Contents of $BOOT_DIR: $(ls -la $BOOT_DIR 2>&1)"
-    # Don't proceed: panic-on-PID1-exit is worse than holding here.
-    while true; do sleep 60; info "init: waiting for adb (rootfs not switchable)"; done
-fi
-
-info "Switching to rootfs..."
-exec switch_root -c /dev/console $BOOT_DIR /lib/systemd/systemd
+G=/sys/kernel/config/usb_gadget/g1
+FFS=/dev/usb-ffs/adb
+setup_gadget() {
+    mounted /sys/kernel/config configfs || run mount -t configfs configfs /sys/kernel/config || return 1
+    run mkdir -p "$G/strings/0x409" "$G/configs/c.1/strings/0x409" "$G/functions/ffs.adb" || return 1
+    put "$G/idVendor" 0x18d1 && put "$G/idProduct" 0xd002 || return 1
+    put "$G/strings/0x409/manufacturer" asteroid || return 1
+    put "$G/strings/0x409/product" ticwatch-pro-5 || return 1
+    put "$G/strings/0x409/serialnumber" 0123456789 || return 1
+    put "$G/configs/c.1/strings/0x409/configuration" adb || return 1
+    [ -L "$G/configs/c.1/f1" ] || run ln -s "$G/functions/ffs.adb" "$G/configs/c.1/f1" || return 1
+    # The function instance MUST exist before FunctionFS acquires device "adb".
+    mounted "$FFS" functionfs || run mount -t functionfs adb "$FFS" -o uid=2000,gid=2000 || return 1
+    [ -e "$FFS/ep0" ] || return 1
+    return 0
+}
+ready=0; adbd_pid=; starts=0; last_start=0; last_setup=0
+start=$(date +%s); last_status=0; warned=0; previous=
+while true; do
+    now=$(date +%s)
+    if [ "$ready" -eq 0 ] && [ $((now - last_setup)) -ge 10 ]; then
+        last_setup=$now
+        if setup_gadget; then ready=1; log 'FunctionFS ready'; fi
+    fi
+    if [ "$ready" -eq 1 ] && { [ -z "$adbd_pid" ] || ! kill -0 "$adbd_pid" 2>/dev/null; }; then
+        if [ "$starts" -lt 3 ] && [ $((now - last_start)) -ge 10 ]; then
+            # A previous daemon may have closed its descriptors while still bound.
+            bound=$(cat "$G/UDC" 2>/dev/null)
+            [ -z "$bound" ] || put "$G/UDC" ''
+            /bin/adbd >> /tmp/adbd.log 2>&1 &
+            adbd_pid=$!; starts=$((starts + 1)); last_start=$now
+            log "adbd start=$starts pid=$adbd_pid"
+        fi
+    fi
+    udc=
+    for device in /sys/class/udc/*; do
+        [ -d "$device" ] || continue
+        udc=${device##*/}; break
+    done
+    alive=0; endpoints=0
+    if [ -n "$adbd_pid" ] && kill -0 "$adbd_pid" 2>/dev/null; then alive=1; fi
+    if [ -e "$FFS/ep1" ] && [ -e "$FFS/ep2" ]; then endpoints=1; fi
+    bound=$(cat "$G/UDC" 2>/dev/null)
+    if [ -n "$udc" ] && [ "$alive" -eq 1 ] && [ "$endpoints" -eq 1 ] && [ "$bound" != "$udc" ]; then
+        if put "$G/UDC" "$udc"; then bound=$udc; log "bound $udc (host ADB unverified)"; fi
+    fi
+    state="udc=${udc:-none} ffs=$ready adbd=$alive ep=$endpoints bound=${bound:-none}"
+    if [ "$state" != "$previous" ] || [ $((now - last_status)) -ge 30 ]; then
+        log "$state"; previous=$state; last_status=$now
+        dace_status "$state"
+    fi
+    if [ "$warned" -eq 0 ] && [ $((now - start)) -ge 120 ] && [ -z "$bound" ]; then
+        warned=1
+        mkdir -p /sys/kernel/debug
+        mounted /sys/kernel/debug debugfs || run mount -t debugfs debugfs /sys/kernel/debug
+        [ ! -r /sys/kernel/debug/devices_deferred ] || cp /sys/kernel/debug/devices_deferred /tmp/devices_deferred.txt
+        dmesg > /tmp/usb-dmesg.txt 2>> "$LOG"
+        log 'not bound after 120s; snapshots saved; no automatic reboot'
+    fi
+    sleep 3
+done
