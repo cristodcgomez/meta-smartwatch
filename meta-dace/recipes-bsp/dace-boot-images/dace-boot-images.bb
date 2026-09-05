@@ -155,10 +155,13 @@ do_compile() {
     cp ${S}/static/monaco-real.dtb ${WORKDIR}/dtb-monaco-real.dtb
     bbnote "usando monaco-real.dtb (T5) como DTB del vendor_kernel_boot"
 
-    # ─── Step 4: cpio + lz4 the vkb ramdisk ───
+    # ─── Step 4: cpio + gzip the vkb ramdisk ───
+    # El ABL del T5 espera el ramdisk como gzip -> cpio-newc plano con
+    # lib/modules/*.ko (formato del vendor_boot STOCK Mobvoi). lz4 NO lo
+    # descomprime -> EDL 05c6:900e directo.
     ( cd ${WORKDIR}/vkb_ramdisk && find . | sort | \
         cpio -o -H newc --owner root:root 2>/dev/null ) > ${WORKDIR}/vkb_rd.cpio
-    lz4 -l -9 -f ${WORKDIR}/vkb_rd.cpio ${WORKDIR}/vkb_rd.lz4
+    gzip -9 -c ${WORKDIR}/vkb_rd.cpio > ${WORKDIR}/vkb_rd.gz
 
     MKBOOTIMG=${STAGING_BINDIR_NATIVE}/mkbootimg
 
@@ -170,7 +173,7 @@ do_compile() {
     "${MKBOOTIMG}" \
         --header_version 4 --pagesize ${MKBOOTIMG_PAGESIZE} \
         --vendor_boot ${WORKDIR}/vendor_kernel_boot.img \
-        --vendor_ramdisk ${WORKDIR}/vkb_rd.lz4 \
+        --vendor_ramdisk ${WORKDIR}/vkb_rd.gz \
         --dtb ${WORKDIR}/dtb-monaco-real.dtb \
         --base ${MKBOOTIMG_BASE} \
         --kernel_offset ${MKBOOTIMG_KERNEL_OFFSET} \
