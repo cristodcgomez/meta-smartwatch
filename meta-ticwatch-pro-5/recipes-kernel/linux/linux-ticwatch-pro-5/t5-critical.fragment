@@ -64,6 +64,11 @@ CONFIG_RD_LZ4=y
 # panic=10 (cmdline) fuerza reboot tras panic para que el log se escriba.
 CONFIG_PSTORE_BLK=y
 CONFIG_PSTORE_ZONE=y
+# PSTORE_FS: filesystem pstore — SIN él no se puede montar /sys/fs/pstore y
+# el init no puede leer console-ramoops-0 (v69b forense falló por esto:
+# pantalla azul + beacon). El registro en RAM lo hace PSTORE_CONSOLE+RAM
+# aunque no haya FS, pero leerlo exige PSTORE_FS=y.
+CONFIG_PSTORE_FS=y
 CONFIG_PSTORE_BLK_KMSG_SIZE=256
 # earlycon + consola GENI (ttyMSM0) built-in para log temprano
 CONFIG_SERIAL_EARLYCON=y
@@ -75,6 +80,26 @@ CONFIG_SERIAL_QCOM_GENI_CONSOLE=y
 CONFIG_DEVMEM=y
 # CONFIG_STRICT_DEVMEM is not set
 # CONFIG_IO_STRICT_DEVMEM is not set
+
+# --- V65 VIA B (réplica stock): módulos vendor PREBUILTS del stock ---
+# Los .ko del vendor_boot stock (Mobvoi msm-5.15 g7f9d6c16b5cd) se usan
+# TAL CUAL en el vendor ramdisk. Para que carguen contra nuestro kernel:
+#  1. FORCE_LOAD=y: los .ko vienen sin sección __versions (stripped en el
+#     host); check_version(versindex==0) exige try_to_force_load -> requiere
+#     este símbolo. Sin él, insmod -ENOEXEC.
+#  2. EXTRAVERSION en la receta alinea UTS_RELEASE con el vermagic stock
+#     (5.15.144-g7f9d6c16b5cd-ab151) para same_magic() strcmp completo.
+#  3. MODVERSIONS se deja =y (las flags del vermagic incluyen "modversions"
+#     y deben coincidir exactamente con el string del .ko stock).
+CONFIG_MODULE_FORCE_LOAD=y
+
+# STACKPROTECTOR: los módulos stock necesitan __stack_chk_fail (exportado solo
+# con STACKPROTECTOR=y; los stock se compilaron con STRONG). Los otros 3
+# símbolos que faltan (__cfi_slowpath_diag, __ubsan_handle_cfi_check_fail_abort,
+# kasan_flag_enabled) vienen del parche dace-stock-stubs.patch (CFI_CLANG
+# requiere LTO_CLANG — desactivado por OOM — así que van como stubs).
+CONFIG_STACKPROTECTOR=y
+CONFIG_STACKPROTECTOR_STRONG=y
 
 # --- BATERÍA/PMIC: apagar los que requieren gvotable.h (out-of-tree) ---
 # drivers/power/supply/qcom/{pmic-voter-compat,smblite}.c incluyen

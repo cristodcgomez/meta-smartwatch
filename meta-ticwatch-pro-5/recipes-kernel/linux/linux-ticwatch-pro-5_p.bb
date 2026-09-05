@@ -29,6 +29,8 @@ SRC_URI = "git:///home/cristo/TICWATCH/google-eos-kernel;branch=halium-13.0;prot
            file://eud-secure-fail-nonfatal.patch \
            file://slatecom-ssr-optional.patch \
            file://minidump-int-type.patch \
+           file://dace-stock-stubs.patch \
+           file://dwc3-core-probe-trace.patch \
            file://monaco-real.dtb \
            file://monacop.dtb \
            file://vendor-bootconfig \
@@ -54,7 +56,7 @@ KERNEL_DEVICETREE = ""
 DEPENDS += "clang-native rsync-native elfutils-native mkbootimg-tools-native lz4-native dtc-native kmod-native"
 LLVM_BIN = "${STAGING_BINDIR_NATIVE}"
 PATH:prepend = "${STAGING_BINDIR_NATIVE}:"
-KERNEL_CC = "${LLVM_BIN}/clang --target=aarch64-linux-gnu -fuse-ld=lld"
+KERNEL_CC = "${LLVM_BIN}/clang --target=aarch64-linux-gnu -fuse-ld=lld -Wno-unused-command-line-argument"
 KERNEL_LD = "${LLVM_BIN}/ld.lld"
 KERNEL_AR = "${LLVM_BIN}/llvm-ar"
 KERNEL_NM = "${LLVM_BIN}/llvm-nm"
@@ -62,6 +64,10 @@ KERNEL_OBJCOPY = "${LLVM_BIN}/llvm-objcopy"
 KERNEL_OBJDUMP = "${LLVM_BIN}/llvm-objdump"
 KERNEL_STRIP = "${LLVM_BIN}/llvm-strip"
 EXTRA_OEMAKE:append = " LLVM=1 LLVM_IAS=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-"
+# V65 VIA B: UTS_RELEASE = vermagic de los módulos vendor STOCK (Mobvoi
+# msm-5.15 g7f9d6c16b5cd-ab151). same_magic() hace strcmp completo (los .ko
+# van sin __versions) → la cadena de versión debe coincidir EXACTAMENTE.
+EXTRA_OEMAKE:append = " EXTRAVERSION=-g7f9d6c16b5cd-ab151"
 EXTRA_OEMAKE:append = " KCFLAGS='-Wno-error -Wno-implicit-function-declaration -Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=int-conversion -Wno-error=incompatible-function-pointer-types -Wno-error=incompatible-pointer-types -Wno-error=strict-prototypes' HOSTCFLAGS=-Wno-error"
 
 OBJCOPY = "${LLVM_BIN}/llvm-objcopy"
@@ -103,13 +109,13 @@ do_configure:append() {
     echo 'CONFIG_EFI_STUB=y' >> ${B}/.config
     echo 'CONFIG_EFI_GENERIC_STUB=y' >> ${B}/.config
     yes '' | oe_runmake -C ${S} O=${B} ARCH=arm64 \
-        CC="${LLVM_BIN}/clang --target=aarch64-linux-gnu -fuse-ld=lld" \
+        CC="${LLVM_BIN}/clang --target=aarch64-linux-gnu -fuse-ld=lld -Wno-unused-command-line-argument" \
         LD="${LLVM_BIN}/ld.lld" LLVM=1 LLVM_IAS=1 \
         CROSS_COMPILE=aarch64-linux-gnu- HOSTCC=gcc HOSTCXX=g++ olddefconfig
     # BTF off definitivo (el árbol google lo re-fuerza tras el merge)
     sed -i "/^CONFIG_DEBUG_INFO_BTF=/d; s/^CONFIG_DEBUG_INFO_BTF=y/# CONFIG_DEBUG_INFO_BTF is not set/" ${B}/.config
     yes '' | oe_runmake -C ${S} O=${B} ARCH=arm64 \
-        CC="${LLVM_BIN}/clang --target=aarch64-linux-gnu -fuse-ld=lld" \
+        CC="${LLVM_BIN}/clang --target=aarch64-linux-gnu -fuse-ld=lld -Wno-unused-command-line-argument" \
         LD="${LLVM_BIN}/ld.lld" LLVM=1 LLVM_IAS=1 \
         CROSS_COMPILE=aarch64-linux-gnu- HOSTCC=gcc HOSTCXX=g++ olddefconfig
     # monaco_GKI re-marca USB_F_QDSS=m y USB_CONFIGFS_F_QDSS=m; ambos
@@ -142,7 +148,7 @@ do_configure:append() {
     done
     # re-resolver deps tras forzar =y (puede activar mas símbolos necesarios)
     yes '' | oe_runmake -C ${S} O=${B} ARCH=arm64 \
-        CC="${LLVM_BIN}/clang --target=aarch64-linux-gnu -fuse-ld=lld" \
+        CC="${LLVM_BIN}/clang --target=aarch64-linux-gnu -fuse-ld=lld -Wno-unused-command-line-argument" \
         LD="${LLVM_BIN}/ld.lld" LLVM=1 LLVM_IAS=1 \
         CROSS_COMPILE=aarch64-linux-gnu- HOSTCC=gcc HOSTCXX=g++ olddefconfig
     # QCOM_RPROC_COMMON es tristate ciego: solo queda =y si un driver =y lo
@@ -186,7 +192,7 @@ do_compile_kernelmodules:append() {
     ln -sfn ${BMS} ${KSR}/../google-modules/bms
     BMSPATH="${KSR}/../google-modules/bms"
 
-    CC="${LLVM_BIN}/clang --target=aarch64-linux-gnu -fuse-ld=lld"
+    CC="${LLVM_BIN}/clang --target=aarch64-linux-gnu -fuse-ld=lld -Wno-unused-command-line-argument"
     LD="${LLVM_BIN}/ld.lld"
     AR="${LLVM_BIN}/llvm-ar"
     NM="${LLVM_BIN}/llvm-nm"
@@ -256,74 +262,28 @@ do_deploy:append() {
     # El ABL selecciona el DTB por msm-id/board-id del hardware; sin el que
     # coincide (monacop) cae a EDL 05c6:900e (confirmado 22-08-2026).
     VEND=${B}/vendor-ramdisk
-    BMS=${UNPACKDIR}/git-bms
     rm -rf ${VEND} && mkdir -p ${VEND}/lib/modules
-    # ── LAYOUT FLAT (estilo stock/aurora): los .ko van en /lib/modules/X.ko ──
-    # El init first-stage de Android (binario ELF del stock, y nuestro init
-    # shell) lee los .ko de /lib/modules/ plano + modules.load + modules.dep
-    # con paths /lib/modules/. El layout anidado de Yocto
-    # (/lib/modules/VER/kernel/drivers/...) NO lo entiende el first-stage:
-    # el kernel muere antes de userspace porque no carga los drivers del SoC.
-    # Aplanamos: cada .ko del build va a /lib/modules/<nombre>.ko.
-    SRCD=${D}/usr/lib/modules/${KREL}/kernel
-    [ -d "$SRCD" ] || SRCD=${B}/../package/usr/lib/modules/${KREL}/kernel
-    find "$SRCD" -name '*.ko' ! -path '*/.debug/*' | while read -r ko; do
-        base=$(basename "$ko")
-        cp "$ko" "${VEND}/lib/modules/$base"
-    done
-    # Añadir los módulos bms (gvotable + logbuffer + smblite + qbg) al ramdisk.
-    # gvotable/logbuffer quedan junto a sus fuentes en ${BMS}/misc;
-    # qpnp-smblite-main/qti-qbg-main (build M= dentro del árbol) junto a las
-    # fuentes en ${S}/drivers/power/supply/qcom.
-    for f in gvotable logbuffer qpnp-smblite-main qti-qbg-main; do
-        for src in $(find ${BMS} ${S}/drivers/power/supply/qcom -maxdepth 3 -name "${f}.ko" 2>/dev/null); do
-            [ -f "$src" ] || continue
-            cp -n "$src" ${VEND}/lib/modules/ && \
-                bbnote "bms .ko añadido: $(basename $src)" || bbwarn "bms .ko NO copiado: $f"
-        done
-    done
-    # strip debug de los .ko (como aurora; reduce tamaño y evita problemas)
-    LLVM_STRIP=$(find ${STAGING_BINDIR_NATIVE} -name 'llvm-strip' | head -1)
-    if [ -n "$LLVM_STRIP" ]; then
-        find ${VEND}/lib/modules -name '*.ko' -exec "$LLVM_STRIP" --strip-debug {} \; 2>/dev/null || true
-    fi
-    # depmod genera modules.dep/alias/symbols con paths /lib/modules/X.ko.
-    # depmod -b necesita un System.map / lista de simbolos del kernel para
-    # resolver deps; se lo damos con -e (external) y -F System.map. Si no,
-    # depmod aborta en silencio y no genera modules.dep (modprobe no
-    # resolveria deps -> los .ko con dependencias no cargarian -> hang).
-    SYSMAP=${B}/System.map
-    [ -f "$SYSMAP" ] || SYSMAP=${B}/../package/System.map
-    if [ -x "$DEPMOD_BIN" ]; then
-        # depmod SOLO busca .ko en /lib/modules/<KREL>/ -> copiamos ahi los
-        # .ko planos, depmod, y movemos los metafiles de vuelta a plano.
-        mkdir -p ${VEND}/lib/modules/${KREL}
-        cp ${VEND}/lib/modules/*.ko ${VEND}/lib/modules/${KREL}/
-        ( cd ${VEND} && "$DEPMOD_BIN" -b ${VEND} -e -F "$SYSMAP" ${KREL} 2>&1 | tail -3 || true )
-        if [ -f "${VEND}/lib/modules/${KREL}/modules.dep" ]; then
-            # prefijar /lib/modules/ y normalizar a formato stock
-            sed -e 's|^\([^ :]*\.ko\)|/lib/modules/\1|; s| \([^ ]*\.ko\)| /lib/modules/\1|g' \
-                "${VEND}/lib/modules/${KREL}/modules.dep" > "${VEND}/lib/modules/modules.dep"
-            for f in modules.alias modules.symbols modules.softdep; do
-                [ -f "${VEND}/lib/modules/${KREL}/$f" ] && \
-                  sed -e 's|^\([^ :]*\.ko\)|/lib/modules/\1|; s| \([^ ]*\.ko\)| /lib/modules/\1|g' \
-                    "${VEND}/lib/modules/${KREL}/$f" > "${VEND}/lib/modules/$f"
-            done
-            bbnote "modules.dep generado: $(wc -l < ${VEND}/lib/modules/modules.dep) lineas"
-        else
-            bbwarn "modules.dep NO generado por depmod"
-        fi
-        rm -rf "${VEND}/lib/modules/${KREL}"
-    fi
-    # modules.load: cadena USB/charger stock primero; el resto después.
-    # gvotable/logbuffer son dependencias del smblite fuera de árbol.
+    # ── V65 VIA B: módulos vendor STOCK prebuilts (sin __versions) ──
+    # Los .ko son los del vendor_boot stock (Mobvoi msm-5.15 g7f9d6c16b5cd),
+    # con la sección __versions quitada en el host. Contra nuestro kernel:
+    #   - CONFIG_MODULE_FORCE_LOAD=y (fragment) acepta módulos sin CRCs
+    #   - EXTRAVERSION alinea UTS_RELEASE con el vermagic stock
+    #   - MODVERSIONS=y mantiene las flags "modversions" del vermagic
+    # Carga por insmod directo (sin modules.dep/depmod).
+    STOCKMOD=/home/cristo/TICWATCH/ota-stock/extracted/modules-stripped
+    test -d "$STOCKMOD" || bbfatal "$STOCKMOD no existe (extraer vendor_boot stock + llvm-objcopy --remove-section=__versions)"
+    cp ${STOCKMOD}/*.ko ${VEND}/lib/modules/
+    # modules.load: first-stage stock (orden stock) + cadena USB 2ª etapa
+    # (orden verificado en dace stock) + resto alfabético. Dedup por awk.
+    # El init hace dos pasadas sobre esta lista (resuelve dependencias en orden).
     ( cd ${VEND}/lib/modules
       {
-        for f in eud.ko usb_bam.ko phy-generic.ko phy-msm-snps-hs.ko dwc3-msm.ko gvotable.ko logbuffer.ko qpnp-smblite-main.ko qti-qbg-main.ko qti_battery_charger.ko; do
+        cat ${STOCKMOD}/../vendor-ramdisk-lib/modules/modules.load 2>/dev/null || true
+        for f in eud.ko usb_bam.ko phy-generic.ko phy-msm-snps-hs.ko dwc3-msm.ko qpnp-smblite-main.ko qti_battery_charger.ko; do
             [ -f "$f" ] && echo "$f"
         done
-        ls *.ko | grep -v -E '^(eud.ko|usb_bam.ko|phy-generic.ko|phy-msm-snps-hs.ko|dwc3-msm.ko|gvotable.ko|logbuffer.ko|qpnp-smblite-main.ko|qti-qbg-main.ko|qti_battery_charger.ko)$' | sort
-      } > modules.load
+        ls *.ko | sort
+      } | awk '!seen[$0]++' > modules.load
     )
     test -s ${VEND}/lib/modules/modules.load || bbfatal "modules.load vacío o no generado"
     cp ${VEND}/lib/modules/modules.load ${VEND}/lib/modules/modules.load.recovery 2>/dev/null || true
@@ -332,8 +292,17 @@ do_deploy:append() {
     gzip -9 -f ${B}/vendor_rd.cpio
     # DTB blob stock: conserva extcon=<charger eud>, USB3_GDSC-supply y
     # el estado original de smblite (okay) y QBG (disabled). Sin bypasses.
+    # V67: ÚNICO cambio — dr_mode otg→peripheral en el hijo dwc3: con "otg" el
+    # core espera la decisión de rol del glue (extcon/io-channel del charger);
+    # sin ella el gadget nunca se inicializa → sin UDC. peripheral = gadget
+    # directo (un reloj solo necesita modo device). Probado fdtput en host.
+    FDTPUT=$(find ${STAGING_BINDIR_NATIVE} -name fdtput 2>/dev/null | head -1)
+    [ -n "$FDTPUT" ] || FDTPUT=$(command -v fdtput)
+    test -n "$FDTPUT" || bbfatal "fdtput no encontrado (dtc-native)"
     for dtb in monaco-real monacop; do
         cp ${UNPACKDIR}/${dtb}.dtb ${B}/${dtb}-stock.dtb
+        "$FDTPUT" -t s ${B}/${dtb}-stock.dtb /soc/hsusb@4e00000/dwc3@4e00000 dr_mode peripheral
+        bbnote "$dtb: dr_mode=peripheral forzado en dwc3@4e00000"
     done
     cat ${B}/monaco-real-stock.dtb ${B}/monacop-stock.dtb > ${B}/dtb-blob-vendor.bin
     bbnote "DTB blob vendor_boot: $(stat -c%s ${B}/dtb-blob-vendor.bin) bytes (stock=572016)"

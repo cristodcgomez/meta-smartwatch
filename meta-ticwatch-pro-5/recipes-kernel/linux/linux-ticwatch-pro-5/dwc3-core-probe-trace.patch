@@ -1,0 +1,179 @@
+From: TicWatch Pro 5 port
+Subject: [PATCH] usb: dwc3: core: trace probe steps via /sys/kernel/dace_core
+
+Expone el paso exacto del probe del core dwc3 (built-in) en
+/sys/kernel/dace_core (paso + errno; bit 0x40 = salio por error) para
+localizar el bloqueo D0 sin UART: 1=entry 2=ioremap 3=clk 4=is_valid
+5=drvdata 6=core_init 7=get_phy 8=phy_init 9=soft_reset 10=core_init ok
+11=core_init_mode 12=gadget_init ok 13=success. El sysfs se crea con
+late_initcall (el core es built-in) para existir aunque el probe no corra.
+Sin cambios funcionales.
+
+Upstream-Status: Inappropriate [dace bring-up]
+---
+--- a/drivers/usb/dwc3/core.c
++++ b/drivers/usb/dwc3/core.c
+@@ -1054,6 +1054,7 @@
+ 		if (ret)
+ 			goto err0a;
+ 		dwc->phys_ready = true;
++		dace_core_step = 7;
+ 	}
+ 
+ 	usb_phy_init(dwc->usb2_phy);
+@@ -1067,10 +1068,12 @@
+ 		phy_exit(dwc->usb2_generic_phy);
+ 		goto err0a;
+ 	}
++	dace_core_step = 8;
+ 
+ 	ret = dwc3_core_soft_reset(dwc);
+ 	if (ret)
+ 		goto err1;
++	dace_core_step = 9;
+ 
+ 	if (hw_mode == DWC3_GHWPARAMS0_MODE_DRD &&
+ 	    !DWC3_VER_IS_WITHIN(DWC3, ANY, 194A)) {
+@@ -1228,6 +1231,8 @@
+ 	dwc3_ulpi_exit(dwc);
+ 
+ err0:
++	dace_core_ret = ret;
++	dace_core_step |= 0x40;
+ 	return ret;
+ }
+ 
+@@ -1290,6 +1295,7 @@
+ {
+ 	struct device *dev = dwc->dev;
+ 	int ret;
++	dace_core_step = 11;
+ 
+ 	switch (dwc->dr_mode) {
+ 	case USB_DR_MODE_PERIPHERAL:
+@@ -1301,8 +1307,12 @@
+ 		phy_set_mode(dwc->usb3_generic_phy, PHY_MODE_USB_DEVICE);
+ 
+ 		ret = dwc3_gadget_init(dwc);
+-		if (ret)
++		if (ret) {
++			dace_core_ret = ret;
++			dace_core_step |= 0x40;
+ 			return dev_err_probe(dev, ret, "failed to initialize gadget\n");
++		}
++		dace_core_step = 12;
+ 		break;
+ 	case USB_DR_MODE_HOST:
+ 		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_HOST);
+@@ -1610,6 +1620,25 @@
+ 	}
+ }
+ 
++/* dace trace: paso del probe del core dwc3 (0 = probe nunca llamado) */
++volatile int dace_core_step;
++int dace_core_ret;
++
++#include <linux/sysfs.h>
++#include <linux/kobject.h>
++static ssize_t dace_core_show(struct kobject *k, struct kobj_attribute *a,
++			      char *buf)
++{
++	return sprintf(buf, "%d %d\n", dace_core_step, dace_core_ret);
++}
++static struct kobj_attribute dace_core_attr =
++	__ATTR(dace_core, 0444, dace_core_show, NULL);
++static int __init dace_core_sysfs_init(void)
++{
++	return sysfs_create_file(kernel_kobj, &dace_core_attr.attr);
++}
++late_initcall(dace_core_sysfs_init);
++
+ static int dwc3_probe(struct platform_device *pdev)
+ {
+ 	struct device		*dev = &pdev->dev;
+@@ -1627,6 +1656,7 @@
+ 
+ 	dwc = &vdwc->dwc;
+ 	dwc->dev = dev;
++	dace_core_step = 1;
+ 
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	if (!res) {
+@@ -1648,8 +1678,13 @@
+ 	dwc_res.start += DWC3_GLOBALS_REGS_START;
+ 
+ 	regs = devm_ioremap_resource(dev, &dwc_res);
+-	if (IS_ERR(regs))
+-		return PTR_ERR(regs);
++	if (IS_ERR(regs)) {
++		ret = PTR_ERR(regs);
++		dace_core_ret = ret;
++		dace_core_step |= 0x40;
++		return ret;
++	}
++	dace_core_step = 2;
+ 
+ 	dwc->regs	= regs;
+ 	dwc->regs_size	= resource_size(&dwc_res);
+@@ -1662,8 +1697,11 @@
+ 
+ 	if (dev->of_node) {
+ 		ret = devm_clk_bulk_get_all(dev, &dwc->clks);
+-		if (ret == -EPROBE_DEFER)
++		if (ret == -EPROBE_DEFER) {
++			dace_core_ret = ret;
++			dace_core_step |= 0x40;
+ 			return ret;
++		}
+ 		/*
+ 		 * Clocks are optional, but new DT platforms should support all
+ 		 * clocks as required by the DT-binding.
+@@ -1682,6 +1720,7 @@
+ 	ret = clk_bulk_prepare_enable(dwc->num_clks, dwc->clks);
+ 	if (ret)
+ 		goto assert_reset;
++	dace_core_step = 3;
+ 
+ 	if (!dwc3_core_is_valid(dwc)) {
+ 		dev_err(dwc->dev, "this is not a DesignWare USB3 DRD Core\n");
+@@ -1690,7 +1729,9 @@
+ 	}
+ 
+ 	platform_set_drvdata(pdev, dwc);
++	dace_core_step = 4;
+ 	dwc3_cache_hwparams(dwc);
++	dace_core_step = 5;
+ 
+ 	if (!dwc->sysdev_is_parent &&
+ 	    DWC3_GHWPARAMS0_AWIDTH(dwc->hwparams.hwparams0) == 64) {
+@@ -1725,11 +1766,13 @@
+ 	if (ret)
+ 		goto err3;
+ 
++	dace_core_step = 6;
+ 	ret = dwc3_core_init(dwc);
+ 	if (ret) {
+ 		dev_err_probe(dev, ret, "failed to initialize core\n");
+ 		goto err4;
+ 	}
++	dace_core_step = 10;
+ 
+ 	dwc3_check_params(dwc);
+ 	dwc3_debugfs_init(dwc);
+@@ -1742,6 +1785,7 @@
+ 
+ 	dma_set_max_seg_size(dev, UINT_MAX);
+ 
++	dace_core_step = 13;
+ 	return 0;
+ 
+ err5:
+@@ -1779,6 +1823,8 @@
+ 	if (dwc->usb_psy)
+ 		power_supply_put(dwc->usb_psy);
+ 
++	dace_core_ret = ret;
++	dace_core_step |= 0x40;
+ 	return ret;
+ }
+ 
