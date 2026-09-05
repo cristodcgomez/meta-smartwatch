@@ -64,10 +64,14 @@ inherit deploy nopackages
 # require resolves from any recipe in meta-dace.
 require recipes-kernel/linux/linux-dace-version.inc
 KMODVER ?= "${DACE_KERNEL_VERSION}"
+# KREL del kernel: DACE_KERNEL_VERSION + EXTRAVERSION del vendorkernel
+# (5.15.144 + -g7f9d6c16b5cd-ab151). La carpeta /lib/modules/<KREL> del
+# workdir del kernel usa este nombre, no el DACE_KERNEL_VERSION pelado.
+DACE_KREL ?= "${DACE_KERNEL_VERSION}-g7f9d6c16b5cd-ab151"
 # linux-dace's workdir uses ${MACHINE}${TARGET_VENDOR}-${TARGET_OS}
 # (= dace-oe-linux-gnueabi). do_install drops .ko's into package/.
 LINUX_DACE_WORKDIR ?= "${TMPDIR}/work/${MACHINE}${TARGET_VENDOR}-${TARGET_OS}/linux-dace/${KMODVER}+git"
-LINUX_DACE_PKGDIR  ?= "${LINUX_DACE_WORKDIR}/package/usr/lib/modules/${KMODVER}/kernel"
+LINUX_DACE_PKGDIR  ?= "${LINUX_DACE_WORKDIR}/package/usr/lib/modules/${DACE_KREL}/kernel"
 # linux-dace keeps its build artifacts in its own workdir's build/
 # (out-of-tree B != S). STAGING_KERNEL_BUILDDIR is empty because we don't go
 # through the standard kernel.bbclass staging for these.
