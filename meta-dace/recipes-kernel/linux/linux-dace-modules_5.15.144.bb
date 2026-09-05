@@ -391,7 +391,7 @@ do_compile() {
     done
 }
 
-KREL ?= "${DACE_KERNEL_VERSION}"
+KREL ?= "${DACE_KERNEL_VERSION}-g7f9d6c16b5cd-ab151"
 # Collect every built techpack .ko flat under the kernel-release dir. Use
 # ${nonarch_base_libdir} so it lands in /usr/lib under the usrmerge distro
 # feature.

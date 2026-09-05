@@ -60,6 +60,10 @@ do_configure:prepend() {
     echo "# CONFIG_LTO_CLANG is not set" >> ${WORKDIR}/defconfig
     echo "CONFIG_LTO_NONE=y" >> ${WORKDIR}/defconfig
     echo "# CONFIG_CFI_CLANG is not set" >> ${WORKDIR}/defconfig
+    # Aceptar los 260 .ko pre-built del vendor_boot STOCK (Mobvoi msm-5.15,
+    # sin seccion __versions): el kernel dace no conoce sus CRCs/ABI. Igual
+    # que la receta ticwatch (t5-critical.fragment).
+    echo "CONFIG_MODULE_FORCE_LOAD=y" >> ${WORKDIR}/defconfig
     # Keep the SoC/vendor drivers =m; do not fold them into vmlinux. Qualcomm
     # vendor drivers resolve many symbols only at module-load (e.g.
     # qcom_smd_rpm_quickboot has no in-tree definition; a provider .ko supplies
@@ -88,6 +92,10 @@ KERNEL_OBJCOPY = "${LLVM_BIN}/llvm-objcopy"
 KERNEL_OBJDUMP = "${LLVM_BIN}/llvm-objdump"
 KERNEL_STRIP = "${LLVM_BIN}/llvm-strip"
 EXTRA_OEMAKE:append = " LLVM=1 LLVM_IAS=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-"
+# Alinear el vermagic con el de los módulos STOCK Mobvoi del vendor_boot
+# (5.15.144-g7f9d6c16b5cd-ab151). Sin esto, los 260 .ko del vendor_boot T5
+# no cargan en este kernel (mismatch de vermagic) y no hay UDC/usb.
+EXTRA_OEMAKE:append = " EXTRAVERSION=-g7f9d6c16b5cd-ab151"
 # clang-15..20 promoted a family of C89-isms from warning to DEFAULT-ERROR
 # (independent of -Werror): -Wimplicit-int, -Wint-conversion,
 # -W{incompatible-function,incompatible}-pointer- types,
