@@ -18,6 +18,9 @@ bootloader-assembled one anyway."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
+# Los DTBs vienen de ota-stock/blobs: monaco-real.dtb + monacop.dtb son los
+# que el ABL del T5 espera (board-id T5). vkb-base.dtb (aurora) fue rechazado
+# por el ABL (EDL 05c6:900e). monaco-real ya trae ramoops@9ff00000 y splash.
 SRC_URI = "\
     file://dace-vkb-assemble.py \
     file://dace-vkb-modules.lst \
@@ -25,7 +28,9 @@ SRC_URI = "\
     file://static/modules.softdep \
     file://static/modules.load.charger \
     file://static/modules.dep \
-    file://static/vkb-base.dtb \
+    file://static/bootconfig \
+    file://static/monaco-real.dtb \
+    file://static/monacop.dtb \
 "
 S = "${UNPACKDIR}"
 
@@ -141,36 +146,14 @@ do_compile() {
     find ${WORKDIR}/vkb_ramdisk -name "*.ko" -exec "$LLVM_STRIP" --strip-debug {} \;
     bbnote "stripped debug info from aarch64 kernel modules"
 
-    # ─── Step 3: ramoops DTB. Base = static vkb-base.dtb (stock,
-    #            bootloader-approved with qcom,msm-id + qcom,board-id
-    #            intact). Inject ramoops node so kernel pstore mounts. ───
-    cp ${S}/static/vkb-base.dtb ${WORKDIR}/dtb-ramoops.dtb
-    FDTPUT=${STAGING_BINDIR_NATIVE}/fdtput
-    N=/reserved-memory/ramoops@61F00000
-    "${FDTPUT}" -c ${WORKDIR}/dtb-ramoops.dtb "$N"
-    "${FDTPUT}" -t s ${WORKDIR}/dtb-ramoops.dtb "$N" compatible ramoops
-    "${FDTPUT}"      ${WORKDIR}/dtb-ramoops.dtb "$N" no-map
-    "${FDTPUT}" -t x ${WORKDIR}/dtb-ramoops.dtb "$N" reg 0 ${RAMOOPS_BASE} 0 ${RAMOOPS_SIZE}
-    "${FDTPUT}" -t x ${WORKDIR}/dtb-ramoops.dtb "$N" record-size ${RAMOOPS_RECORD}
-    "${FDTPUT}" -t x ${WORKDIR}/dtb-ramoops.dtb "$N" console-size ${RAMOOPS_CONSOLE}
-    "${FDTPUT}" -t x ${WORKDIR}/dtb-ramoops.dtb "$N" pmsg-size ${RAMOOPS_PMSG}
-    bbnote "ramoops node injected into base DTB"
-
-    # ─── Step 3b: continuous-splash framebuffer node. The bootloader paints
-    #     the boot logo into splash_region@0x5c000000 and SDE keeps scanning it
-    #     until the composer takes over. qcom-cont-splash-fb binds this node and
-    #     exposes that live buffer as /dev/fb0 for psplash. Geometry is the
-    #     panel native res (384x384, 32bpp xRGB, stride 384*4=1536); frame =
-    #     1536*384 = 0x90000 bytes. ───
-    S_NODE=/cont-splash-fb
-    "${FDTPUT}" -c ${WORKDIR}/dtb-ramoops.dtb "$S_NODE"
-    "${FDTPUT}" -t s ${WORKDIR}/dtb-ramoops.dtb "$S_NODE" compatible "qcom,cont-splash-fb"
-    "${FDTPUT}" -t x ${WORKDIR}/dtb-ramoops.dtb "$S_NODE" reg 0 0x5c000000 0 0x90000
-    "${FDTPUT}" -t u ${WORKDIR}/dtb-ramoops.dtb "$S_NODE" width 384
-    "${FDTPUT}" -t u ${WORKDIR}/dtb-ramoops.dtb "$S_NODE" height 384
-    "${FDTPUT}" -t u ${WORKDIR}/dtb-ramoops.dtb "$S_NODE" stride 1536
-    "${FDTPUT}" -t s ${WORKDIR}/dtb-ramoops.dtb "$S_NODE" format "x8r8g8b8"
-    bbnote "cont-splash-fb node injected into base DTB"
+    # ─── Step 3: DTB T5. monaco-real.dtb (de ota-stock/blobs) ya trae el
+    #     nodo ramoops@9ff00000 y splash_region@5c000000 — NO hay que inyectarlos
+    #     (el ABL del T5 rechazó el vkb-base.dtb de aurora con EDL 05c6:900e;
+    #     los DTBs T5 son los únicos con board-id/msm-id que el ABL acepta).
+    #     Usamos monaco-real.dtb tal cual; el second DTB monacop.dtb se queda
+    #     en static/ por si un ABL con msm-id diverge lo pidiera. ───
+    cp ${S}/static/monaco-real.dtb ${WORKDIR}/dtb-monaco-real.dtb
+    bbnote "usando monaco-real.dtb (T5) como DTB del vendor_kernel_boot"
 
     # ─── Step 4: cpio + lz4 the vkb ramdisk ───
     ( cd ${WORKDIR}/vkb_ramdisk && find . | sort | \
@@ -180,17 +163,22 @@ do_compile() {
     MKBOOTIMG=${STAGING_BINDIR_NATIVE}/mkbootimg
 
     # ─── Step 5: mkbootimg vendor_kernel_boot.img (v4) ───
+    # vendor_cmdline + vendor_bootconfig replican los del vendor_boot STOCK T5
+    # (extraídos de ota-stock/blobs): cmdline inline con lpm_levels/video=vfb/…
+    # y bootconfig con androidboot.hardware=dace. Sin ellos el ABL deja de
+    # aceptar el vendor_boot ("Invalid Parameter").
     "${MKBOOTIMG}" \
         --header_version 4 --pagesize ${MKBOOTIMG_PAGESIZE} \
         --vendor_boot ${WORKDIR}/vendor_kernel_boot.img \
         --vendor_ramdisk ${WORKDIR}/vkb_rd.lz4 \
-        --dtb ${WORKDIR}/dtb-ramoops.dtb \
+        --dtb ${WORKDIR}/dtb-monaco-real.dtb \
         --base ${MKBOOTIMG_BASE} \
         --kernel_offset ${MKBOOTIMG_KERNEL_OFFSET} \
         --ramdisk_offset ${MKBOOTIMG_RAMDISK_OFFSET} \
         --tags_offset ${MKBOOTIMG_TAGS_OFFSET} \
         --dtb_offset ${MKBOOTIMG_DTB_OFFSET} \
-        --vendor_cmdline ''
+        --vendor_cmdline 'lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=noforce kpti=off cgroup.memory=nokmem,nosocket loop.max_part=7 bootconfig qcom_geni_serial.con_enabled=0' \
+        --vendor_bootconfig ${S}/static/bootconfig
 
     # ─── Step 6: mkbootimg boot.img (v4): our kernel + empty ramdisk ───
     if [ ! -f "${LINUX_DACE_KIMG}" ]; then
