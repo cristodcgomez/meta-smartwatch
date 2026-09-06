@@ -107,10 +107,11 @@ if [ "$DEBUG_RAMDISK" = "1" ]; then
     mount -t configfs none /sys/kernel/config 2>/dev/null || true
     ptext "P22 configfs mount"
 
-    # TEST A: saltarse android-gadget-setup adb — aislar si tocar configfs/
-    # gadget dispara el dwc3/charger de fondo y panicea el kernel.
-    # /usr/bin/android-gadget-setup adb
-    ptext "P23 gadget-setup SKIPPED"
+    # Reintroducido el gadget-setup: probar el UDC con el charger fuera
+    # (EUD solo via skip-deferred-extcon). La UDC podria registrarse sin
+    # el charger (el parche lo permite).
+    /usr/bin/android-gadget-setup adb
+    ptext "P23 gadget-setup done"
 
     # Legacy /sys/class/android_usb writes -- silently no-op on our 5.15 GKI
     # kernel which doesn't have CONFIG_USB_ANDROID. Kept for parity with the
