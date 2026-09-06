@@ -109,14 +109,17 @@ smcinvoke_dlkm.ko
 google-extcon-usb-shim.ko
 gvotable.ko
 logbuffer.ko
-# ── CAPTURA PANIC: charger cargado (flujo real). Si panicea, el ramoops
-# registra el panic para leerlo con edl peek 0x9ff00000. ──
-qpnp-smblite-main.ko
-qti-qbg-main.ko
-google-bms.ko
-google-battery.ko
-google-charger.ko
-sw5100_bms.ko
+# ── BASE ESTABLE (hybrid27): cadena charger/BMS comentada ──
+# El charger (qpnp-smblite) panicea el kernel de forma NO determinista en el
+# T5 (race del PMIC/ABL). Base estable = sin la cadena charger:
+# kernel vivo + init loop P20. Reintroducir solo cuando el panic se resuelva
+# (v6.1: telemetria C/P/G/D del glue via dwc3-msm-probe-trace.patch).
+# qpnp-smblite-main.ko
+# qti-qbg-main.ko
+# google-bms.ko
+# google-battery.ko
+# google-charger.ko
+# sw5100_bms.ko
 nanohub.ko
 touch_nt38350.ko
 cl_dsp.ko
