@@ -107,12 +107,10 @@ if [ "$DEBUG_RAMDISK" = "1" ]; then
     mount -t configfs none /sys/kernel/config 2>/dev/null || true
     ptext "P22 configfs mount"
 
-    # android-gadget-setup adb creates the configfs gadget, the
-    # functions/ffs.usb0 function (which triggers functionfs_init() and
-    # registers the `functionfs` fs type), AND mounts it at /dev/usb-ffs/adb.
-    # We don't need a separate mount call.
-    /usr/bin/android-gadget-setup adb
-    ptext "P23 gadget-setup done"
+    # TEST A: saltarse android-gadget-setup adb — aislar si tocar configfs/
+    # gadget dispara el dwc3/charger de fondo y panicea el kernel.
+    # /usr/bin/android-gadget-setup adb
+    ptext "P23 gadget-setup SKIPPED"
 
     # Legacy /sys/class/android_usb writes -- silently no-op on our 5.15 GKI
     # kernel which doesn't have CONFIG_USB_ANDROID. Kept for parity with the
