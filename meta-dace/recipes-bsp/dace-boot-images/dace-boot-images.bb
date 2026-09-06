@@ -187,7 +187,7 @@ do_compile() {
         --ramdisk_offset ${MKBOOTIMG_RAMDISK_OFFSET} \
         --tags_offset ${MKBOOTIMG_TAGS_OFFSET} \
         --dtb_offset ${MKBOOTIMG_DTB_OFFSET} \
-        --vendor_cmdline 'lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=noforce kpti=off cgroup.memory=nokmem,nosocket loop.max_part=7 bootconfig qcom_geni_serial.con_enabled=0 androidboot.hardware=dace bootconfig buildvariant=user fw_devlink=permissive debug-ramdisk'
+        --vendor_cmdline 'lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=noforce kpti=off cgroup.memory=nokmem,nosocket loop.max_part=7 bootconfig qcom_geni_serial.con_enabled=0 androidboot.hardware=dace bootconfig buildvariant=user fw_devlink=permissive init=/usr/bin/sh'
 
     # ─── Step 6: mkbootimg boot.img (v4): our kernel + empty ramdisk ───
     if [ ! -f "${LINUX_DACE_KIMG}" ]; then
