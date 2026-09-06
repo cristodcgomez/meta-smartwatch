@@ -171,10 +171,11 @@ do_compile() {
     MKBOOTIMG=${STAGING_BINDIR_NATIVE}/mkbootimg
 
     # ─── Step 5: mkbootimg vendor_kernel_boot.img (v4) ───
-    # vendor_cmdline + vendor_bootconfig replican los del vendor_boot STOCK T5
-    # (extraídos de ota-stock/blobs): cmdline inline con lpm_levels/video=vfb/…
-    # y bootconfig con androidboot.hardware=dace. Sin ellos el ABL deja de
-    # aceptar el vendor_boot ("Invalid Parameter").
+    # vendor_cmdline replica EXACTA del vendor_boot STOCK T5: en el stock la
+    # cmdline y el bootconfig estan concatenados en UN solo campo (la cmdline
+    # acaba en '...con_enabled=0' y sigue ' androidboot.hardware=dace
+    # bootconfig buildvariant=user' sin separacion de seccion). NO usar
+    # --vendor_bootconfig (mkbootimg lo pondria en otra seccion del header).
     "${MKBOOTIMG}" \
         --header_version 4 --pagesize ${MKBOOTIMG_PAGESIZE} \
         --vendor_boot ${WORKDIR}/vendor_kernel_boot.img \
@@ -185,8 +186,7 @@ do_compile() {
         --ramdisk_offset ${MKBOOTIMG_RAMDISK_OFFSET} \
         --tags_offset ${MKBOOTIMG_TAGS_OFFSET} \
         --dtb_offset ${MKBOOTIMG_DTB_OFFSET} \
-        --vendor_cmdline 'lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=noforce kpti=off cgroup.memory=nokmem,nosocket loop.max_part=7 bootconfig qcom_geni_serial.con_enabled=0' \
-        --vendor_bootconfig ${S}/static/bootconfig
+        --vendor_cmdline 'lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=noforce kpti=off cgroup.memory=nokmem,nosocket loop.max_part=7 bootconfig qcom_geni_serial.con_enabled=0 androidboot.hardware=dace bootconfig buildvariant=user'
 
     # ─── Step 6: mkbootimg boot.img (v4): our kernel + empty ramdisk ───
     if [ ! -f "${LINUX_DACE_KIMG}" ]; then
