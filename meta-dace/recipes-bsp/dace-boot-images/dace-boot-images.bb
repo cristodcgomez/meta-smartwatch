@@ -151,19 +151,19 @@ do_compile() {
     find ${WORKDIR}/vkb_ramdisk -name "*.ko" -exec "$LLVM_STRIP" --strip-debug {} \;
     bbnote "stripped debug info from aarch64 kernel modules"
 
-    # ─── Step 3: DTB T5. monaco-real.dtb (de ota-stock/blobs) ya trae el
-    #     nodo ramoops@9ff00000 y splash_region@5c000000 — NO hay que inyectarlos
-    #     (el ABL del T5 rechazó el vkb-base.dtb de aurora con EDL 05c6:900e;
-    #     los DTBs T5 son los únicos con board-id/msm-id que el ABL acepta).
-    #     Usamos monaco-real.dtb tal cual; el second DTB monacop.dtb se queda
-    #     en static/ por si un ABL con msm-id diverge lo pidiera. ───
-    cp ${S}/static/monaco-real.dtb ${WORKDIR}/dtb-monaco-real.dtb
-    bbnote "usando monaco-real.dtb (T5) como DTB del vendor_kernel_boot"
+    # ─── Step 3: DTB blob T5 = 2 DTBs CONCATENADOS (monaco-real + monacop). ───
+    # El ABL selecciona el DTB por msm-id/board-id del hardware: monaco-real
+    # (qcom,monaco, msm-id 486) + monacop (qcom,monacop, msm-id 517). Sin el
+    # que coincide (monacop) cae a EDL 05c6:900e (confirmado 22-08-2026 en la
+    # receta ticwatch). vkb-base.dtb (aurora) ya no se usa.
+    # monaco-real ya trae ramoops@9ff00000 y splash_region — no inyectar.
+    cat ${S}/static/monaco-real.dtb ${S}/static/monacop.dtb > ${WORKDIR}/dtb-blob-vendor.bin
+    bbnote "DTB blob vendor_boot: $(stat -c%s ${WORKDIR}/dtb-blob-vendor.bin) bytes (stock=572016)"
 
-    # ─── Step 4: cpio + gzip the vkb ramdisk ───
-    # El ABL del T5 espera el ramdisk como gzip -> cpio-newc plano con
-    # lib/modules/*.ko (formato del vendor_boot STOCK Mobvoi). lz4 NO lo
-    # descomprime -> EDL 05c6:900e directo.
+    # ─── Step 4: cpio + gzip del ramdisk ───
+    # dace-vkb-assemble.py ya dejó vkb_ramdisk/lib/modules/*.ko planos +
+    # modules.dep (rutas absolutas) + modules.load(.recovery). Solo empaquetar
+    # en cpio+gzip (formato del vendor_boot stock T5: gzip -> cpio-newc). ───
     ( cd ${WORKDIR}/vkb_ramdisk && find . | sort | \
         cpio -o -H newc --owner root:root 2>/dev/null ) > ${WORKDIR}/vkb_rd.cpio
     gzip -9 -c ${WORKDIR}/vkb_rd.cpio > ${WORKDIR}/vkb_rd.gz
@@ -171,22 +171,21 @@ do_compile() {
     MKBOOTIMG=${STAGING_BINDIR_NATIVE}/mkbootimg
 
     # ─── Step 5: mkbootimg vendor_kernel_boot.img (v4) ───
-    # vendor_cmdline replica EXACTA del vendor_boot STOCK T5: en el stock la
-    # cmdline y el bootconfig estan concatenados en UN solo campo (la cmdline
-    # acaba en '...con_enabled=0' y sigue ' androidboot.hardware=dace
-    # bootconfig buildvariant=user' sin separacion de seccion). NO usar
-    # --vendor_bootconfig (mkbootimg lo pondria en otra seccion del header).
+    # Replica la receta ticwatch (que arranca): --base 0, cmdline stock
+    # completa (con bootconfig Y fw_devlink), --vendor_bootconfig por archivo,
+    # blob de 2 DTBs. Sin el monacop el ABL cae a EDL.
     "${MKBOOTIMG}" \
         --header_version 4 --pagesize ${MKBOOTIMG_PAGESIZE} \
         --vendor_boot ${WORKDIR}/vendor_kernel_boot.img \
         --vendor_ramdisk ${WORKDIR}/vkb_rd.gz \
-        --dtb ${WORKDIR}/dtb-monaco-real.dtb \
+        --vendor_bootconfig ${S}/static/bootconfig \
+        --dtb ${WORKDIR}/dtb-blob-vendor.bin \
         --base ${MKBOOTIMG_BASE} \
         --kernel_offset ${MKBOOTIMG_KERNEL_OFFSET} \
         --ramdisk_offset ${MKBOOTIMG_RAMDISK_OFFSET} \
         --tags_offset ${MKBOOTIMG_TAGS_OFFSET} \
         --dtb_offset ${MKBOOTIMG_DTB_OFFSET} \
-        --vendor_cmdline 'lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=noforce kpti=off cgroup.memory=nokmem,nosocket loop.max_part=7 bootconfig qcom_geni_serial.con_enabled=0 androidboot.hardware=dace bootconfig buildvariant=user'
+        --vendor_cmdline 'lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=noforce kpti=off cgroup.memory=nokmem,nosocket loop.max_part=7 bootconfig qcom_geni_serial.con_enabled=0 androidboot.hardware=dace bootconfig buildvariant=user fw_devlink=permissive'
 
     # ─── Step 6: mkbootimg boot.img (v4): our kernel + empty ramdisk ───
     if [ ! -f "${LINUX_DACE_KIMG}" ]; then

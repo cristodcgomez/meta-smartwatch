@@ -1,1 +1,2 @@
-androidboot.hardware=dace bootconfig buildvariant=user
+androidboot.hardware=dace
+androidboot.memcg=1
