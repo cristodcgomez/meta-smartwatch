@@ -15,6 +15,7 @@ SRC_URI = "git://gitlab.com/ubports/porting/community-ports/android13/google-eos
            file://cmd-mod-file-func.patch \
            file://cc-o-c-respfile.patch \
            file://eud-secure-fail-nonfatal.patch \
+           file://dwc3-msm-skip-deferred-extcon.patch \
            file://rtc-pm8xxx-read-only.patch \
            file://0001-video-fbdev-add-qcom-continuous-splash-framebuffer.patch \
            file://dace-bootcolor.py"
@@ -146,7 +147,7 @@ WARN_QA:append = " arch buildpaths"
 # Production cmdline. systempart/datapart are explicit in case the bootloader
 # omits them on some slot. console=tty0 keeps the VT console (CONFIG_VT in
 # sw5100.fragment); apparmor is the active LSM so no selinux args.
-DACE_CMDLINE = "systempart=/dev/mapper/system datapart=/dev/mmcblk0p82 console=tty0"
+DACE_CMDLINE = "systempart=/dev/mapper/system datapart=/dev/mmcblk0p82 console=tty0 console=ttyGS0,115200"
 do_configure:append() {
     sed -i '/^CONFIG_CMDLINE=/d' ${B}/.config
     echo 'CONFIG_CMDLINE="${DACE_CMDLINE}"' >> ${B}/.config

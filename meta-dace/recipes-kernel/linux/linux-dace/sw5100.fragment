@@ -20,7 +20,7 @@ CONFIG_DUMMY_CONSOLE=y
 CONFIG_LDISC_AUTOLOAD=y
 
 # Kernel-owned USB debug channel.
-CONFIG_USB_G_SERIAL=m
+CONFIG_USB_G_SERIAL=y
 CONFIG_U_SERIAL_CONSOLE=y
 
 # gcc-monaco/gdsc fail with "Failed to register GCC clocks" when
