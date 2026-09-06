@@ -63,8 +63,11 @@ modprobe google-extcon-usb-shim usb_force_disable_boot=0 2>/dev/kmsg
 ptext "P3 modprobe load"
 
 info "Loading dace kernel modules from /etc/modules.load.dace ..."
+MI=0
 while read mod; do
     case "$mod" in ''|\#*) continue ;; esac
+    MI=$((MI+1))
+    ptext "P3 mod ${MI} ${mod%.ko}"
     modprobe "${mod%.ko}" 2>/dev/kmsg
 done < /etc/modules.load.dace
 info "Loaded dace kernel modules: $(ls /sys/bus/platform/drivers/ 2>/dev/null | wc -l) platform drivers registered"

@@ -86,7 +86,11 @@ qcom_smd.ko
 qcom-spmi-adc5-gen3.ko
 qcom-vadc-common.ko
 nvmem_qcom-spmi-sdam.ko
-qnoc-monaco.ko
+# qnoc-monaco.ko — cuelga el modprobe (~8s en, tras 82 modulos; ver init #3
+# MOD 083/116 y P3 de hybrid21). El DT T5 difiere del de aurora en la cadena
+# NoC. Se comenta SOLO qnoc (icc-rpm/qnoc-qos se mantienen: con qnoc ausente
+# no colgan en modprobe, y el resto de la cadena aurora puede progresar).
+# qnoc-monaco.ko
 icc-rpm.ko
 qnoc-qos-rpm.ko
 qrtr.ko
