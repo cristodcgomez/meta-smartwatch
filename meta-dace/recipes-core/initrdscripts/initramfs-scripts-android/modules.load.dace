@@ -109,12 +109,17 @@ smcinvoke_dlkm.ko
 google-extcon-usb-shim.ko
 gvotable.ko
 logbuffer.ko
-qpnp-smblite-main.ko
-qti-qbg-main.ko
-google-bms.ko
-google-battery.ko
-google-charger.ko
-sw5100_bms.ko
+# ── bring-up: cadena charger/BMS comentada (base estable hybrid27) ──
+# El charger (qpnp-smblite) queda colgado esperando VDD_CX (cadena RPM no
+# completa en el dace) y panicea el kernel a los ~1-15s (P26 poll 1 -> reboot
+# aun con WQ_WATCHDOG off). Dejamos la cadena comentada como base sana;
+# reintroducir cuando VDD_CX se resuelva (eslabon v47).
+# qpnp-smblite-main.ko
+# qti-qbg-main.ko
+# google-bms.ko
+# google-battery.ko
+# google-charger.ko
+# sw5100_bms.ko
 nanohub.ko
 touch_nt38350.ko
 cl_dsp.ko
