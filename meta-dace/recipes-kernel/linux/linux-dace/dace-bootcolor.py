@@ -319,7 +319,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
     cyan_anchor = '\twait_for_initramfs();\n'
     cyan_inject = ('\twait_for_initramfs();\n'
                    '\tdace_boot_color(0x00ff00ff); /* CYAN: wait_for_initramfs done */\n'
-                   '\tpr_err("dace-bootcolor: CYAN (wait_for_initramfs done)\n");\n')
+                   '\tpr_err("dace-bootcolor: CYAN (wait_for_initramfs done)\\n");\n')
     if cyan_anchor not in src:
         sys.exit("bootcolor: no anchor CYAN")
     src = src.replace(cyan_anchor, cyan_inject, 1)
