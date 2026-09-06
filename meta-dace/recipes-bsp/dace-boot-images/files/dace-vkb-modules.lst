@@ -38,8 +38,10 @@ secure_buffer:k
 mem_buf:k
 mem_buf_dev:k
 socinfo:k
-qcom_wdt_core:k
-qcom_soc_wdt:k
+# qcom_wdt_core / qcom_soc_wdt ya no se construyen (WQ_WATCHDOG/WDT off en
+# el fragment para el bring-up) — quitados del manifest.
+# qcom_wdt_core:k
+# qcom_soc_wdt:k
 memory_dump_v2:k
 dcc_v2:k
 qcom-pmu-lib:k
