@@ -109,16 +109,12 @@ smcinvoke_dlkm.ko
 google-extcon-usb-shim.ko
 gvotable.ko
 logbuffer.ko
-# ── TEST: cadena charger/BMS comentada ──
-# CONFIG_WQ_WATCHDOG=y (built-in del charger) puede paniquear si la workqueue
-# del charger se queda colgada (espera VDD_CX). Comentamos la cadena charger
-# para ver si el kernel sobrevive sin ella en el init.
-# qpnp-smblite-main.ko
-# qti-qbg-main.ko
-# google-bms.ko
-# google-battery.ko
-# google-charger.ko
-# sw5100_bms.ko
+qpnp-smblite-main.ko
+qti-qbg-main.ko
+google-bms.ko
+google-battery.ko
+google-charger.ko
+sw5100_bms.ko
 nanohub.ko
 touch_nt38350.ko
 cl_dsp.ko

@@ -117,3 +117,11 @@ CONFIG_BT_HCIVHCI=m
 # (El watch del ABL no se toca; esto es el WDT interno del kernel Qualcomm.)
 # CONFIG_WATCHDOG_CORE is not set
 # CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED is not set
+
+# ─── WQ_WATCHDOG (workqueue watchdog del charger smblite) ───
+# CONFIG_WQ_WATCHDOG=y panicea el kernel si la workqueue del charger
+# (qpnp-smblite) se queda congelada esperando VDD_CX (que no llega en el
+# dace porque la cadena RPM no completa). Es el disparador del panic a los
+# ~8-15s (init vivo -> reboot). Off para el bring-up.
+# CONFIG_WQ_WATCHDOG is not set
+# CONFIG_QCOM_SOC_WATCHDOG is not set
