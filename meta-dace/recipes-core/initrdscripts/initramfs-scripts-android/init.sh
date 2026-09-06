@@ -1,39 +1,49 @@
 #!/bin/sh
-# init minimal de PRUEBA — discrimina:
-#   (a) exec /init funciona pero el script aurora cuelga
-#   (b)though el initramfs ni se monta (exec falla)
-# Pinta /sys/kernel/dace_text (si el kernel lo expone) y listado de lo que ve.
-info() { echo "minit: $1" > /dev/kmsg 2>/dev/null; }
+# init dace #2 — carga SOLO los modulos first-stage (sin adb, sin gadget, sin
+# switch_root). Divide el aurora en piezas: si esto cuelga, son los modulos.
+info() { echo "minit2: $1" > /dev/kmsg 2>/dev/null; }
 
-info "MINIT: init inicio"
+info "MINIT2: inicio"
 mount -t proc proc /proc 2>/dev/null
 mount -t sysfs sysfs /sys 2>/dev/null
 mount -t devtmpfs devtmpfs /dev 2>/dev/null
+mkdir -p /dev/pts /sys/kernel/config /dev/usb-ffs/adb
+mount -t devpts devpts /dev/pts 2>/dev/null
 
-# 1. Pinta telemetria en la pantalla si el kernel la expone
-if [ -w /sys/kernel/dace_text ]; then
-    printf 'MINIT OK\nroot=%s\n' "$(ls / | tr '\n' ' ')" > /sys/kernel/dace_text
+KREL=$(uname -r)
+[ ! -e "/lib/modules/$KREL" ] && ln -sf . "/lib/modules/$KREL" 2>/dev/null
+
+# 1. intentar cargar el shim (si existe)
+if command -v modprobe >/dev/null 2>&1; then
+    modprobe google-extcon-usb-shim usb_force_disable_boot=0 2>/dev/kmsg
+    info "shim modprobe rc=$?"
 fi
 
-# 2. Lista lo que ve (para diagnosticar la raiz y los modulos)
-{
-    echo "=== raiz ==="
-    ls -la /
-    echo "=== /lib/modules ($(ls /lib/modules/*.ko 2>/dev/null | wc -l) .ko) ==="
-    ls /lib/modules/ 2>/dev/null | head -5
-    echo "=== cmdline ==="
-    cat /proc/cmdline 2>/dev/null
-    echo "=== uname ==="
-    uname -a 2>/dev/null
-} > /dev/kmsg 2>&1 || true
+# 2. loop de modulos desde modules.load.dace (si existe)
+N_OK=0; N_FAIL=0; N_TOT=0
+if [ -f /etc/modules.load.dace ]; then
+    while read mod; do
+        case "$mod" in ''|\#*) continue ;; esac
+        mod="${mod%.ko}"
+        N_TOT=$((N_TOT+1))
+        if modprobe "$mod" 2>/dev/kmsg; then
+            N_OK=$((N_OK+1))
+        else
+            N_FAIL=$((N_FAIL+1))
+        fi
+    done < /etc/modules.load.dace
+fi
+info "MINIT2: modulos tot=$N_TOT ok=$N_OK fail=$N_FAIL"
 
-# 3. Bonito color VERDE sostenido (0x0000ff00) via dace_text + loop
+# 3. pintar en pantalla
 if [ -w /sys/kernel/dace_text ]; then
-    while true; do
-        printf 'MINIT VIVO %s\n' "$(date +%s 2>/dev/null)" > /sys/kernel/dace_text
-        sleep 2
-    done
+    printf 'MODS tot=%s ok=%s fail=%s\nuname=%s\n' "$N_TOT" "$N_OK" "$N_FAIL" "$(uname -r)" > /sys/kernel/dace_text
 fi
 
-# fallback: si no hay dace_text, bucle infinito sin hacer nada (evita EDL)
-while true; do sleep 60; done
+# 4. loop vivo
+while true; do
+    if [ -w /sys/kernel/dace_text ]; then
+        printf 'MODS tot=%s ok=%s fail=%s VIVO\n' "$N_TOT" "$N_OK" "$N_FAIL" > /sys/kernel/dace_text
+    fi
+    sleep 3
+done
