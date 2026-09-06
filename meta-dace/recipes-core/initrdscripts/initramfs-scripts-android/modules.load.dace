@@ -109,16 +109,14 @@ smcinvoke_dlkm.ko
 google-extcon-usb-shim.ko
 gvotable.ko
 logbuffer.ko
-# ── bring-up: cadena charger/BMS comentada (base estable hybrid27) ──
-# El charger (qpnp-smblite) es NO determinista: a veces vive, a veces
-# panicea <15s (race del PMIC). Lo dejamos fuera; el glue dwc3-msm con el
-# parche skip-deferred-extcon deberia bindear por el EUD sin el charger.
-# qpnp-smblite-main.ko
-# qti-qbg-main.ko
-# google-bms.ko
-# google-battery.ko
-# google-charger.ko
-# sw5100_bms.ko
+# ── CAPTURA PANIC: charger cargado (flujo real). Si panicea, el ramoops
+# registra el panic para leerlo con edl peek 0x9ff00000. ──
+qpnp-smblite-main.ko
+qti-qbg-main.ko
+google-bms.ko
+google-battery.ko
+google-charger.ko
+sw5100_bms.ko
 nanohub.ko
 touch_nt38350.ko
 cl_dsp.ko
