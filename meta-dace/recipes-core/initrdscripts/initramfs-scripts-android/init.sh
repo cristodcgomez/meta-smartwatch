@@ -127,10 +127,17 @@ if [ "$DEBUG_RAMDISK" = "1" ]; then
     echo 1 > /sys/class/android_usb/android0/enable 2>/dev/null
 
     # TEST: SIN adbd — ver si el kernel vive sin el proceso adb.
+    # Dentro del loop: medir el eslabon v47 (rpm-smd/genpd/psci):
+    #   - /sys/kernel/debug/devices_deferred (que defiere, ej rpm-smd)
+    #   - /sys/bus/platform/drivers/* (que drivers están bound)
     ptext "P26 no-adbd poll 0"
     i=0
-    while [ $i -lt 60 ]; do
-        ptext "P26 poll ${i} (sin adbd)"
+    while [ $i -lt 120 ]; do
+        DFR=$(cat /sys/kernel/debug/devices_deferred 2>/dev/null | grep -iE "rpm|smd|glink|apcs|gdsc|psci" | tr '\n' ' ' | cut -c1-40)
+        DRV=$(ls /sys/bus/platform/drivers/ 2>/dev/null | grep -iE "rpm|smd|glink|apcs" | tr '\n' ' ' | cut -c1-40)
+        ptext "P26 poll ${i}"
+        ptext "DFR ${DFR:-none}"
+        ptext "DRV ${DRV:-none}"
         sleep 1
         i=$((i+1))
     done
