@@ -314,6 +314,22 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
     if blue_anchor not in src:
         sys.exit("bootcolor: no anchor BLUE")
     src = src.replace(blue_anchor, blue_inject, 1)
+    # CYAN: wait_for_initramfs() completado (el kernel ya no espera al initrd).
+    # Si el AZUL aparece pero el CYAN no, el hang esta en kunit/wait_for_initramfs.
+    cyan_anchor = '\twait_for_initramfs();\n'
+    cyan_inject = ('\twait_for_initramfs();\n'
+                   '\tdace_boot_color(0x00ff00ff); /* CYAN: wait_for_initramfs done */\n'
+                   '\tpr_err("dace-bootcolor: CYAN (wait_for_initramfs done)\n");\n')
+    if cyan_anchor not in src:
+        sys.exit("bootcolor: no anchor CYAN")
+    src = src.replace(cyan_anchor, cyan_inject, 1)
+    # VERDE: vamos a execve del /init del initramfs (run_init_process).
+    green_anchor = '\tif (ramdisk_execute_command) {\n'
+    green_inject = ('\tif (ramdisk_execute_command) {\n'
+                    '\tdace_boot_color(0x0000ff00); /* VERDE: exec /init */\n')
+    if green_anchor not in src:
+        sys.exit("bootcolor: no anchor GREEN")
+    src = src.replace(green_anchor, green_inject, 1)
     # AMARILLO: entramos en kernel_init (rest_init funcionó; a continuación
     # se ejecuta /init del initramfs). Distingue "kernel completo OK" de
     # "el exec de /init falla".
