@@ -145,6 +145,18 @@ if [ "$DEBUG_RAMDISK" = "1" ]; then
     # debug-ramdisk is a sticky mode: stay in the initramfs forever with adb up.
     # The user flips it on to investigate boot failures and doesn't want
     # switch_root to free our adbd out from under them.
+    # TEST B: lanzar SOLO adbd (sin gadget-setup) para ver si adbd panicea
+    # con el charger cargado. P27 = poll de adbd vivo.
+    ptext "P27 adbd-only start"
+    /usr/bin/adbd &
+    ADBD_PID=$!
+    i=0
+    while [ $i -lt 60 ]; do
+        if kill -0 "$ADBD_PID" 2>/dev/null; then ST=up; else ST=dead; fi
+        ptext "P27 poll ${i} adbd=${ST}"
+        sleep 1
+        i=$((i+1))
+    done
     info "debug-ramdisk: staying in initramfs (adb available); never switching to rootfs"
     while true; do sleep 5; ptext "P20 ADB alive"; done
 fi
