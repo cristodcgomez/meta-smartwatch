@@ -130,35 +130,14 @@ if [ "$DEBUG_RAMDISK" = "1" ]; then
 
     /usr/bin/adbd &
     ptext "P24 adbd start"
-
-    # Bind to the first available UDC -- writing the UDC name into
-    # configfs/usb_gadget/<g>/UDC is what makes the USB device visible to the
-    # host. dwc3-msm probes via deferred-init module load (it's =m, loaded from
-    # modules.load.dace after sdhci-msm), so the UDC appears 2-10s into boot.
-    # Poll up to 30s in 0.5s steps and verify an entry actually exists in
-    # /sys/class/udc/.
-    info "adbd: usb_gadget=$(cd /sys/kernel/config/usb_gadget 2>/dev/null && echo *)"
-    UDC=""
+    # TEST: adbd lanzado; esperamos a ver si el kernel vive (P20 ADB alive)
+    # en vez del poll UDC 30s que puede panickear al tocar el gadget sin UDC.
     i=0
-    while [ $i -lt 30 ]; do
-        UDC=$(cd /sys/class/udc 2>/dev/null && echo *)
-        case "$UDC" in '*'|''|'.'|'..') UDC="" ;; esac
-        [ -n "$UDC" ] && break
+    while [ $i -lt 60 ]; do
+        ptext "P25 poll ${i} adbd=$(kill -0 $! 2>/dev/null && echo up || echo dead)"
         sleep 1
         i=$((i+1))
     done
-    if [ -n "$UDC" ]; then
-        UDC=$(echo "$UDC" | awk '{print $1}')
-        info "adbd: found UDC=$UDC after $((i+1))s"
-        if echo "$UDC" > /sys/kernel/config/usb_gadget/adb/UDC 2>/dev/kmsg; then
-            info "adbd: bound UDC=$UDC successfully"
-        else
-            info "adbd: bind to $UDC FAILED (write error)"
-        fi
-    else
-        info "adbd: NO UDC found after 30s -- dwc3-msm gate still off?"
-        info "adbd: /sys/class/udc entries = '$(cd /sys/class/udc 2>/dev/null && echo *)'"
-    fi
 
     # debug-ramdisk is a sticky mode: stay in the initramfs forever with adb up.
     # The user flips it on to investigate boot failures and doesn't want
