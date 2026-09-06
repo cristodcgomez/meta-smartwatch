@@ -103,13 +103,16 @@ if [ "$DEBUG_RAMDISK" = "1" ]; then
     # systemd auto-mounts it in the rootfs but we're pre- systemd in the
     # initramfs -- do it ourselves.
     mkdir -p /sys/kernel/config
+    ptext "P21 configfs mkdir"
     mount -t configfs none /sys/kernel/config 2>/dev/null || true
+    ptext "P22 configfs mount"
 
     # android-gadget-setup adb creates the configfs gadget, the
     # functions/ffs.usb0 function (which triggers functionfs_init() and
     # registers the `functionfs` fs type), AND mounts it at /dev/usb-ffs/adb.
     # We don't need a separate mount call.
     /usr/bin/android-gadget-setup adb
+    ptext "P23 gadget-setup done"
 
     # Legacy /sys/class/android_usb writes -- silently no-op on our 5.15 GKI
     # kernel which doesn't have CONFIG_USB_ANDROID. Kept for parity with the
@@ -126,6 +129,7 @@ if [ "$DEBUG_RAMDISK" = "1" ]; then
     echo 1 > /sys/class/android_usb/android0/enable 2>/dev/null
 
     /usr/bin/adbd &
+    ptext "P24 adbd start"
 
     # Bind to the first available UDC -- writing the UDC name into
     # configfs/usb_gadget/<g>/UDC is what makes the USB device visible to the
