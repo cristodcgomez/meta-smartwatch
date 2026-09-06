@@ -147,7 +147,7 @@ WARN_QA:append = " arch buildpaths"
 # Production cmdline. systempart/datapart are explicit in case the bootloader
 # omits them on some slot. console=tty0 keeps the VT console (CONFIG_VT in
 # sw5100.fragment); apparmor is the active LSM so no selinux args.
-DACE_CMDLINE = "systempart=/dev/mapper/system datapart=/dev/mmcblk0p82 console=tty0 console=ttyGS0,115200"
+DACE_CMDLINE = "systempart=/dev/mapper/system datapart=/dev/mmcblk0p82 console=tty0 console=ttyGS0,115200 debug-ramdisk"
 do_configure:append() {
     sed -i '/^CONFIG_CMDLINE=/d' ${B}/.config
     echo 'CONFIG_CMDLINE="${DACE_CMDLINE}"' >> ${B}/.config
