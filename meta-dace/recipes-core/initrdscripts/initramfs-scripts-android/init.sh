@@ -8,6 +8,7 @@
 # /dev/kmsg is provided by CONFIG_PRINTK + printk.devkmsg=on (set on
 # our cmdline), so it's available as soon as devtmpfs is mounted.
 info() { echo "init: $1" > /dev/kmsg 2>/dev/null; }
+ptext() { [ -w /sys/kernel/dace_text ] && printf '%s\n' "$1" > /sys/kernel/dace_text 2>/dev/null; }
 fail() {
     echo "init: Failed" > /dev/kmsg 2>/dev/null
     echo "init: $1" > /dev/kmsg 2>/dev/null
@@ -30,6 +31,7 @@ info "Mounting relevant filesystems ..."
 mkdir -m 0755 /proc;  mount -t proc proc /proc
 mkdir -m 0755 /sys;   mount -t sysfs sys /sys
 mkdir -p /dev;        setup_devtmpfs ""
+ptext "P1 mounts"
 
 # ---- DACE-SPECIFIC: load the vendor module chain ----
 # Our 85+ SoC modules are =m. Load them now so /dev/mmcblk0pN appears,
@@ -56,7 +58,9 @@ KREL=$(uname -r)
 # modprobe in our initramfs doesn't honor it. Passing the param directly to
 # modprobe IS honored.
 info "Pre-loading google-extcon-usb-shim with USB gate forced open ..."
+ptext "P2 shim"
 modprobe google-extcon-usb-shim usb_force_disable_boot=0 2>/dev/kmsg
+ptext "P3 modprobe load"
 
 info "Loading dace kernel modules from /etc/modules.load.dace ..."
 while read mod; do
@@ -77,9 +81,13 @@ done
 # (umount -l /proc, mount -t proc proc $BOOT_DIR/proc) happens before
 # switch_root, so any LATER `grep /proc/cmdline` would fail.
 CMDLINE=$(cat /proc/cmdline 2>/dev/null)
+ptext "P4 cmdline: ${CMDLINE#*= }..."
+ptext "P5 vendo: $CMDLINE"
+ptext "P6 cmdl2"
 
 # Checks whether we need to start adbd for interactive debugging
 case "$CMDLINE" in *debug-ramdisk*) DEBUG_RAMDISK=1 ;; *) DEBUG_RAMDISK=0 ;; esac
+ptext "P7 debug=${DEBUG_RAMDISK} ${CMDLINE#*= }"
 if [ "$DEBUG_RAMDISK" = "1" ]; then
     # On this 5.15 GKI kernel CONFIG_USB_F_FS=y but functionfs_init() is NOT a
     # fs_initcall -- f_fs.c's filesystem registration happens lazily when
@@ -149,7 +157,7 @@ if [ "$DEBUG_RAMDISK" = "1" ]; then
     # The user flips it on to investigate boot failures and doesn't want
     # switch_root to free our adbd out from under them.
     info "debug-ramdisk: staying in initramfs (adb available); never switching to rootfs"
-    while true; do sleep 3600; done
+    while true; do sleep 5; ptext "P20 ADB alive"; done
 fi
 
 rotation=0
@@ -158,15 +166,19 @@ rotation=0
 /usr/bin/psplash --angle $rotation --no-console-switch &
 
 info "Mounting sdcard..."
+ptext "P8 sdcard wait"
 mkdir -m 0777 /sdcard /loop
 while [ ! -e /dev/$sdcard_partition ] ; do
     info "Waiting for $sdcard_partition..."
     sleep 1
+    ptext "P9 wait ${sdcard_partition} pass"
 done
 
 /sbin/fsck.ext4 -p /dev/$sdcard_partition
+ptext "P10 fsck done"
 mount -t auto -o rw,noatime,nodiratime /dev/$sdcard_partition /sdcard
 [ $? -eq 0 ] || fail "Failed to mount the sdcard. Cannot continue."
+ptext "P11 sdcard mounted"
 
 info "Checking for loop rootfs image on the sdcard..."
 ANDROID_MEDIA_DIR="/sdcard/media/"
