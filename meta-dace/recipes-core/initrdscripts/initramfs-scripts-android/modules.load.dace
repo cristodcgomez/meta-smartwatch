@@ -86,14 +86,9 @@ qcom_smd.ko
 qcom-spmi-adc5-gen3.ko
 qcom-vadc-common.ko
 nvmem_qcom-spmi-sdam.ko
-# qnoc-monaco.ko — cuelga en modprobe (MOD 083/116 en init #3). El DT T5
-# difiere del de aurora en la cadena NoC. Comentamos la cadena NoC completa
-# (qnoc + hijos icc-rpm/qnoc-qos-rpm) para ver si la muerte en background
-# (init vivo -> negro -> EDL) era por su ausencia/huérfanos. qrtr/qrtr-smd
-# se mantienen (bus qrtr, no depende de qnoc).
-# qnoc-monaco.ko
-# icc-rpm.ko
-# qnoc-qos-rpm.ko
+qnoc-monaco.ko
+icc-rpm.ko
+qnoc-qos-rpm.ko
 qrtr.ko
 # qrtr-smd bridges the qrtr bus onto SMD/glink so ADSP services (audio APM/PDR,
 # WLFW) become reachable; without it the monaco sound card never goes ONLINE.
