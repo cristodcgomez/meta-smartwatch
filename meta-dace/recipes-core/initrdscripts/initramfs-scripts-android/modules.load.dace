@@ -20,8 +20,11 @@ secure_buffer.ko
 mem_buf.ko
 mem_buf_dev.ko
 socinfo.ko
-qcom_wdt_core.ko
-qcom_soc_wdt.ko
+# qcom_wdt_core.ko — WDT core del kernel (módulo, CONFIG_WQ_WATCHDOG=y).
+# Re-activa el watchdog que mata el kernel por 'boot no completo' en el dace
+# (init vivo P24 -> negro -> EDL a los ~10-15s). Comentamos para el bring-up.
+# qcom_wdt_core.ko
+# qcom_soc_wdt.ko
 eud.ko
 memory_dump_v2.ko
 dcc_v2.ko
