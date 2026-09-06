@@ -87,7 +87,12 @@ LINUX_DACE_SYMVERS ?= "${LINUX_DACE_WORKDIR}/build/Module.symvers"
 LINUX_DACE_MODULES_IPK ?= "${DEPLOY_DIR_IPK}/armv7vehf-neon/linux-dace-modules_${KMODVER}-r0_armv7vehf-neon.ipk"
 
 # ─── mkbootimg v4 geometry ───
-MKBOOTIMG_BASE          ?= "0x10000000"
+# BASE 0: el ABL del T5 espera load addresses ABSOLUTAS pequeñas
+# (kernel_load_addr=0x8000, ramdisk=0x1000000, dtb=0x1f00000, tags=0x100),
+# NO base+offset (0x10000000+0x8000=0x10008000). Con base!=0 el vendor_boot
+# es rechazado -> EDL 05c6:900e directo. Igual que los lotes ticwatch que
+# arrancaban (AGENTS.md: "base 0, NO 0x10000000").
+MKBOOTIMG_BASE          ?= "0x0"
 MKBOOTIMG_KERNEL_OFFSET ?= "0x00008000"
 MKBOOTIMG_RAMDISK_OFFSET ?= "0x01000000"
 MKBOOTIMG_TAGS_OFFSET   ?= "0x00000100"
