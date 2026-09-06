@@ -16,7 +16,8 @@ SRC_URI = "git://gitlab.com/ubports/porting/community-ports/android13/google-eos
            file://cc-o-c-respfile.patch \
            file://eud-secure-fail-nonfatal.patch \
            file://rtc-pm8xxx-read-only.patch \
-           file://0001-video-fbdev-add-qcom-continuous-splash-framebuffer.patch"
+           file://0001-video-fbdev-add-qcom-continuous-splash-framebuffer.patch \
+           file://dace-bootcolor.py"
 SRCREV = "063840c5aae117bf0faac8b34fba0e37c9f619f8"
 require linux-dace-version.inc
 LINUX_VERSION = "${DACE_KERNEL_VERSION}"
@@ -43,6 +44,11 @@ KERNEL_IMAGETYPE = "Image"
 # wire native libelf/pahole for resolve_btfids; BTF is BPF-CO-RE/debug,
 # boot-irrelevant).
 do_configure:prepend() {
+    # Telemetría de arranque: ROJO=start_kernel, AZUL=do_basic_setup,
+    # AMARILLO=kernel_init. sysfs /sys/kernel/dace_{color,barcode,text} para
+    # userspace. (mismo dace-bootcolor.py que la receta ticwatch)
+    python3 ${UNPACKDIR}/dace-bootcolor.py ${S}/init/main.c \
+        ${S}/drivers/soc/qcom/slatecom_interface.c 2>/dev/null || true
     sh ${S}/scripts/kconfig/merge_config.sh -m -r -O ${WORKDIR} \
         ${S}/arch/arm64/configs/gki_defconfig \
         ${S}/arch/arm64/configs/vendor/monaco_GKI.config \
