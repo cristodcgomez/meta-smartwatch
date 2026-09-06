@@ -128,13 +128,11 @@ if [ "$DEBUG_RAMDISK" = "1" ]; then
     echo "$serial" > /sys/class/android_usb/android0/iSerial 2>/dev/null
     echo 1 > /sys/class/android_usb/android0/enable 2>/dev/null
 
-    /usr/bin/adbd &
-    ptext "P24 adbd start"
-    # TEST: adbd lanzado; esperamos a ver si el kernel vive (P20 ADB alive)
-    # en vez del poll UDC 30s que puede panickear al tocar el gadget sin UDC.
+    # TEST: SIN adbd — ver si el kernel vive sin el proceso adb.
+    ptext "P26 no-adbd poll 0"
     i=0
     while [ $i -lt 60 ]; do
-        ptext "P25 poll ${i} adbd=$(kill -0 $! 2>/dev/null && echo up || echo dead)"
+        ptext "P26 poll ${i} (sin adbd)"
         sleep 1
         i=$((i+1))
     done
