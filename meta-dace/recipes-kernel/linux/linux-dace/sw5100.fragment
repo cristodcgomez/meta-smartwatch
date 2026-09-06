@@ -107,3 +107,13 @@ CONFIG_FB_QCOM_CONT_SPLASH=y
 # proxies binder→/dev/vhci to expose it to BlueZ on the host side. With
 # this off, /dev/vhci doesn't exist and bluebinder has nowhere to write.
 CONFIG_BT_HCIVHCI=m
+
+# ─── Watchdog interno (bring-up dace) ───
+# CONFIG_WATCHDOG_CORE=y + CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED=y hacen que el
+# kernel se reinicie si el boot no "completa" (cadena clk/regulador USB). En
+# el dace con la cadena incompleta, el WDT mata el kernel a los ~8-15s tras
+# cargar los modulos (init vivo -> negro -> EDL). Para el bring-up los
+# desactivamos: el kernel debe quedarse vivo aunque la cadena USB no complete.
+# (El watch del ABL no se toca; esto es el WDT interno del kernel Qualcomm.)
+# CONFIG_WATCHDOG_CORE is not set
+# CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED is not set
