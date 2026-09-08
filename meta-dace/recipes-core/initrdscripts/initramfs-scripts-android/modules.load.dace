@@ -109,17 +109,16 @@ smcinvoke_dlkm.ko
 google-extcon-usb-shim.ko
 gvotable.ko
 logbuffer.ko
-# ── BASE ESTABLE (hybrid27): cadena charger/BMS comentada ──
-# El charger (qpnp-smblite) panicea el kernel de forma NO determinista en el
-# T5 (race del PMIC/ABL). Base estable = sin la cadena charger:
-# kernel vivo + init loop P20. Reintroducir solo cuando el panic se resuelva
-# (v6.1: telemetria C/P/G/D del glue via dwc3-msm-probe-trace.patch).
+# ── VIA1: cadena charger/BMS mínima (carga escalonada desde init.sh) ──
+# El culpable del hang era la cadena google-* (fuel gauges aurora que no
+# existen en el T5). Dejamos que init.sh los cargue escalonados (STAGE n)
+# para verificar:  qti-qbg-main (STOCK mobvoi, provider IIO del charger)
+# → qpnp-smblite-main (build aurora, charger). gvotable/logbuffer (deps)
+# ya van arriba en el modprobe normal.
+# NO se cargan aquí en el modprobe masivo (los carga la ventana STAGE del init).
+# google-bms/battery/charger/sw5100_bms: aurora-only, cuelgan en T5 → fuera.
 # qpnp-smblite-main.ko
 # qti-qbg-main.ko
-# google-bms.ko
-# google-battery.ko
-# google-charger.ko
-# sw5100_bms.ko
 nanohub.ko
 touch_nt38350.ko
 cl_dsp.ko

@@ -1,0 +1,65 @@
+dace: stubs kernel para módulos vendor stock (CFI/stackprotector)
+
+Los .ko prebuilts del vendor_boot stock (Mobvoi msm-5.15 g7f9d6c16b5cd)
+fueron compilados contra el GKI de Google con CFI_CLANG + KASAN_HW_TAGS +
+STACKPROTECTOR + UBSAN_TRAP. Nuestro kernel (sin LTO/CFI por OOM del host)
+no puede activar CFI_CLANG (depends on LTO_CLANG), así que faltan 2 símbolos
+que casi todos los módulos stock necesitan: __cfi_slowpath_diag y
+__ubsan_handle_cfi_check_fail_abort → este parche (kernel/dace_stubs.c).
+__stack_chk_fail se cubre con CONFIG_STACKPROTECTOR=y (t5-critical.fragment)
+y kasan_flag_enabled lo exporta mm/kasan/hw_tags.c (KASAN_HW_TAGS activo,
+igual que el stock). Sin CFI, todo destino de llamada indirecta es válido
+(stub no-op); la firma del handler es la de cfi_failure_handler
+(kernel/cfi.c:348): (void *data, void *ptr, void *vtable).
+
+Nota: obj-y += va AL FINAL de kernel/Makefile porque la primera asignación
+de obj-y usa '=' (un += previo sería sobrescrito).
+
+Upstream-Status: Inappropriate [dace bring-up: compat con módulos vendor prebuilts]
+Signed-off-by: dace-port <dace@localhost>
+diff --git a/kernel/Makefile b/kernel/Makefile
+index 1f712db74..59d8beb5d 100644
+--- a/kernel/Makefile
++++ b/kernel/Makefile
+@@ -175,3 +175,6 @@ $(obj)/gki_module_exported.h: $(srctree)/android/abi_gki_modules_exports \
+ 				$(srctree)/scripts/gen_gki_modules_headers.sh
+ 	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/gen_gki_modules_headers.sh $@ \
+ 	"$(srctree)"
++
++# dace: stubs para módulos vendor stock (CFI/KASAN) — ver dace-stock-stubs.patch
++obj-y += dace_stubs.o
+diff --git a/kernel/dace_stubs.c b/kernel/dace_stubs.c
+new file mode 100644
+index 000000000..98370fd73
+--- /dev/null
++++ b/kernel/dace_stubs.c
+@@ -0,0 +1,29 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * dace_stubs.c — símbolos que los módulos vendor stock (Mobvoi msm-5.15)
++ * esperan de un kernel GKI con CFI_CLANG. Véase dace-stock-stubs.patch.
++ *
++ * kasan_flag_enabled NO va aquí: con el fix del cc-option, KASAN_HW_TAGS
++ * queda activo (como en el stock) y mm/kasan/hw_tags.c lo define/exporta.
++ */
++#include <linux/export.h>
++#include <linux/panic.h>
++#include <linux/types.h>
++
++/*
++ * CFI slow path: el kernel no tiene CFI (CFI_CLANG exige LTO_CLANG, off por
++ * OOM), así que cualquier destino de llamada indirecta es válido. No-op =
++ * check pasa (mismo comportamiento efectivo que el stock para módulos→kernel).
++ */
++void __cfi_slowpath_diag(u64 id, void *ptr, void *diag)
++{
++}
++EXPORT_SYMBOL(__cfi_slowpath_diag);
++
++/* Handler de fallo CFI con UBSAN_TRAP. Inalcanzable sin CFI; si se llega,
++ * el stock también hace panic (handle_cfi_failure en kernel/cfi.c). */
++void __ubsan_handle_cfi_check_fail_abort(void *data, void *ptr, void *vtable)
++{
++	panic("CFI failure (target: %pS)\n", ptr);
++}
++EXPORT_SYMBOL(__ubsan_handle_cfi_check_fail_abort);

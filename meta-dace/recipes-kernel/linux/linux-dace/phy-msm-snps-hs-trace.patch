@@ -1,0 +1,163 @@
+From: TicWatch Pro 5 port
+Subject: [PATCH] usb: phy: phy-msm-snps-hs: eud tolerante + traza fina (dace)
+
+Instrumentación de bring-up del probe de la phy HS (pasos 11..43).
+Upstream-Status: Inappropriate [dace bring-up]
+---
+diff --git a/drivers/usb/phy/phy-msm-snps-hs.c b/drivers/usb/phy/phy-msm-snps-hs.c
+index 2b55f17e5..8610a8f60 100644
+--- a/drivers/usb/phy/phy-msm-snps-hs.c
++++ b/drivers/usb/phy/phy-msm-snps-hs.c
+@@ -177,6 +177,10 @@ static int msm_hsphy_enable_power(struct msm_hsphy *phy, bool on)
+ 		return 0;
+ 	}
+ 
++	/* dace B: sin control de LDOs -> el bootloader los dejo on */
++	if (!phy->vdd && !phy->vdda18 && !phy->vdda33)
++		return 0;
++
+ 	if (!on)
+ 		goto disable_vdda33;
+ 
+@@ -756,6 +760,14 @@ static void msm_hsphy_create_debugfs(struct msm_hsphy *phy)
+ 	debugfs_create_x8("param_ovrd3", 0644, phy->root, &phy->param_ovrd3);
+ }
+ 
++/* dace traza PHY HS (opcion1): paso del probe */
++static volatile int dace_phy_step = 0;
++#include <linux/sysfs.h>
++#include <linux/kobject.h>
++static ssize_t dace_phy_show(struct kobject *k, struct kobj_attribute *a, char *b)
++{ return sprintf(b, "%d\n", dace_phy_step); }
++static struct kobj_attribute dace_phy_attr = __ATTR(dace_phy, 0444, dace_phy_show, NULL);
++
+ static int msm_hsphy_probe(struct platform_device *pdev)
+ {
+ 	struct msm_hsphy *phy;
+@@ -768,8 +780,10 @@ static int msm_hsphy_probe(struct platform_device *pdev)
+ 		ret = -ENOMEM;
+ 		goto err_ret;
+ 	}
++	sysfs_create_file(kernel_kobj, &dace_phy_attr.attr);
+ 
+ 	phy->phy.dev = dev;
++	dace_phy_step = 11; /* resource hsusb_phy_base */
+ 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+ 						"hsusb_phy_base");
+ 	if (!res) {
+@@ -778,6 +792,7 @@ static int msm_hsphy_probe(struct platform_device *pdev)
+ 		goto err_ret;
+ 	}
+ 
++	dace_phy_step = 12; /* ioremap hsusb_phy_base */
+ 	phy->base = devm_ioremap_resource(dev, res);
+ 	if (IS_ERR(phy->base)) {
+ 		dev_err(dev, "ioremap failed\n");
+@@ -785,6 +800,7 @@ static int msm_hsphy_probe(struct platform_device *pdev)
+ 		goto err_ret;
+ 	}
+ 
++	dace_phy_step = 13; /* rcal */
+ 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+ 							"phy_rcal_reg");
+ 	if (res) {
+@@ -803,17 +819,20 @@ static int msm_hsphy_probe(struct platform_device *pdev)
+ 				phy->phy_rcal_reg);
+ 	}
+ 
++	dace_phy_step = 14; /* eud */
+ 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+ 			"eud_enable_reg");
+ 	if (res) {
+-		phy->eud_enable_reg = devm_ioremap_resource(dev, res);
++		/* dace: el EUD reserva 0x1612000; ioremap plano y tolerante */
++		phy->eud_enable_reg = devm_ioremap(dev, res->start, resource_size(res));
+ 		if (IS_ERR(phy->eud_enable_reg)) {
+-			dev_err(dev, "err getting eud_enable_reg address\n");
+-			return PTR_ERR(phy->eud_enable_reg);
++			dev_dbg(dev, "eud_enable_reg no disponible (bootloader on)");
++			phy->eud_enable_reg = NULL;
+ 		}
+ 		phy->eud_reg = res->start;
+ 	}
+ 
++	dace_phy_step = 20; /* clk */
+ 	/* ref_clk_src is needed irrespective of SE_CLK or DIFF_CLK usage */
+ 	phy->ref_clk_src = devm_clk_get(dev, "ref_clk_src");
+ 	if (IS_ERR(phy->ref_clk_src)) {
+@@ -871,6 +890,7 @@ static int msm_hsphy_probe(struct platform_device *pdev)
+ 		}
+ 	}
+ 
++	dace_phy_step = 30; /* regs */
+ 	ret = of_property_read_u32_array(dev->of_node, "qcom,vdd-voltage-level",
+ 					 (u32 *) phy->vdd_levels,
+ 					 ARRAY_SIZE(phy->vdd_levels));
+@@ -880,25 +900,25 @@ static int msm_hsphy_probe(struct platform_device *pdev)
+ 	}
+ 
+ 
++	/* dace B: LDO opcional (bootloader deja on) */
+ 	phy->vdd = devm_regulator_get(dev, "vdd");
+ 	if (IS_ERR(phy->vdd)) {
+-		dev_err(dev, "unable to get vdd supply\n");
+-		ret = PTR_ERR(phy->vdd);
+-		goto err_ret;
++		dev_dbg(dev, "vdd no disponible (bootloader on)");
++		phy->vdd = NULL;
+ 	}
+ 
++	/* dace B: LDO opcional (bootloader deja on) */
+ 	phy->vdda33 = devm_regulator_get(dev, "vdda33");
+ 	if (IS_ERR(phy->vdda33)) {
+-		dev_err(dev, "unable to get vdda33 supply\n");
+-		ret = PTR_ERR(phy->vdda33);
+-		goto err_ret;
++		dev_dbg(dev, "vdda33 no disponible (bootloader on)");
++		phy->vdda33 = NULL;
+ 	}
+ 
++	/* dace B: LDO opcional (bootloader deja on) */
+ 	phy->vdda18 = devm_regulator_get(dev, "vdda18");
+ 	if (IS_ERR(phy->vdda18)) {
+-		dev_err(dev, "unable to get vdda18 supply\n");
+-		ret = PTR_ERR(phy->vdda18);
+-		goto err_ret;
++		dev_dbg(dev, "vdda18 no disponible (bootloader on)");
++		phy->vdda18 = NULL;
+ 	}
+ 
+ 	mutex_init(&phy->phy_lock);
+@@ -911,16 +931,19 @@ static int msm_hsphy_probe(struct platform_device *pdev)
+ 	phy->phy.set_power		= msm_hsphy_set_power;
+ 	phy->phy.type			= USB_PHY_TYPE_USB2;
+ 
++	dace_phy_step = 40; /* add_phy */
+ 	ret = usb_add_phy_dev(&phy->phy);
+ 	if (ret)
+ 		return ret;
+ 
++	dace_phy_step = 41; /* post add_phy */
+ 	ret = msm_hsphy_regulator_init(phy);
+ 	if (ret) {
+ 		usb_remove_phy(&phy->phy);
+ 		return ret;
+ 	}
+ 
++	dace_phy_step = 42; /* tras regulator_init */
+ 	INIT_WORK(&phy->vbus_draw_work, msm_hsphy_vbus_draw_work);
+ 	msm_hsphy_create_debugfs(phy);
+ 
+@@ -931,6 +954,12 @@
+ 	 */
+ 	if (phy->eud_enable_reg && readl_relaxed(phy->eud_enable_reg))
+ 		msm_hsphy_enable_power(phy, true);
++	dace_phy_step = 43; /* return 0 */
++	/* dace: forzar cable conectado (EUD_SPOOF_CONNECT) ya que el charger
++	 * (fuente de VBUS) no está; sin esto el dwc3-msm nunca arma el path de
++	 * connect y el host no enumera aunque la UDC exista. */
++	phy->phy.flags |= EUD_SPOOF_CONNECT;
++	dev_info(phy->phy.dev, "dace: EUD_SPOOF_CONNECT forzado (sin VBUS)\n");
+ 	return 0;
+ 
+ err_ret:

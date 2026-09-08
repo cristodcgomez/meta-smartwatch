@@ -16,6 +16,11 @@ SRC_URI = "git://gitlab.com/ubports/porting/community-ports/android13/google-eos
            file://cc-o-c-respfile.patch \
            file://eud-secure-fail-nonfatal.patch \
            file://dwc3-msm-skip-deferred-extcon.patch \
+           file://dwc3-msm-probe-trace.patch \
+           file://dwc3-msm-force-vbus-peripheral.patch \
+           file://dace-stock-stubs.patch \
+           file://dwc3-core-probe-trace.patch \
+           file://phy-msm-snps-hs-trace.patch \
            file://rtc-pm8xxx-read-only.patch \
            file://0001-video-fbdev-add-qcom-continuous-splash-framebuffer.patch \
            file://dace-bootcolor.py"

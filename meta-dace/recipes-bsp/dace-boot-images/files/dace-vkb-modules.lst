@@ -150,16 +150,22 @@ qcom-spmi-adc5-gen3:k
 qcom-vadc-common:k
 
 # ────────────────── Charger / BMS chain ──────────────────
-# Built via the linux-dace-modules google-modules/bms{,/misc} +
-# drivers/power/supply/qcom EXT_MODULES path.
+# qpnp-smblite-main (charger) lo construimos de fuente aurora (estable, solo
+# dep gvotable; el smblite STOCK requiere slate_events_bridge, que nuestro
+# kernel no exporta). qti-qbg-main (fuel gauge, provider IIO de chg_type/
+# usbin-* del charger) se cuelga si lo construimos de aurora; usamos el .ko
+# STOCK Mobvoi del vendor_boot T5 (:stock, sin KMI gate — CONFIG_MODULE_
+# FORCE_LOAD=y; vermagic idéntico -g7f9d6c16b5cd-ab151). Los google-bms/
+# battery/charger/sw5100_bms NO existen en el vendor_boot stock T5 (son de
+# aurora/Pixel Watch 2) y sus builds aurora cuelgan en el T5 → omitidos.
 gvotable:tp
 logbuffer:tp
 qpnp-smblite-main:tp
-qti-qbg-main:tp
-google-bms:tp
-google-battery:tp
-google-charger:tp
-sw5100_bms:tp
+qti-qbg-main:stock
+# google-bms:tp
+# google-battery:tp
+# google-charger:tp
+# sw5100_bms:tp
 
 # ────────────────── Touch ──────────────────
 # Loaded at first stage: the bootloader applies the stock dtbo, so the

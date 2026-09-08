@@ -1,0 +1,31 @@
+From: TicWatch Pro 5 port
+Subject: [PATCH] usb: dwc3: dwc3-msm: force vbus_active in peripheral mode
+
+El DT T5 declara extcon=<charger eud>; sin charger el vbus_active queda false
+y el glue no arma el cable (B_SESS_VLD) -> sin pullup -> el host no enumera
+aunque la UDC exista. En dr_mode=peripheral lo forzamos (device-only).
+Upstream-Status: Inappropriate [dace bring-up]
+---
+
+--- a/drivers/usb/dwc3/dwc3-msm-core.c	2026-09-08 20:10:18.297637715 +0200
++++ b/drivers/usb/dwc3/dwc3-msm-core.c	2026-09-08 20:10:30.978234438 +0200
+@@ -6002,6 +6002,19 @@
+ 		dwc3_ext_event_notify(mdwc);
+ 
+ 	dace_glue_step = 7;
++
++	/* dace: forzar vbus en modo peripheral. El DT T5 declara
++	 * extcon=<charger eud>, así que el bloque `!extcon` de arriba no corre y
++	 * vbus_active queda false -> el glue no arma el cable (B_SESS_VLD) -> sin
++	 * pullup -> el host nunca enumera aunque la UDC exista y f_fs lea
++	 * descriptores. Sin el charger (fuente real de vbus), lo forzamos en
++	 * device mode. */
++	if (mdwc->dr_mode == USB_DR_MODE_PERIPHERAL) {
++		mdwc->vbus_active = true;
++		dwc3_ext_event_notify(mdwc);
++		dev_info(mdwc->dev, "dace: vbus forzado en peripheral\n");
++	}
++
+ 	return 0;
+ 
+ put_dwc3:

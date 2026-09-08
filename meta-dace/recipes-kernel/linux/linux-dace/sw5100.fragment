@@ -20,7 +20,12 @@ CONFIG_DUMMY_CONSOLE=y
 CONFIG_LDISC_AUTOLOAD=y
 
 # Kernel-owned USB debug channel.
-CONFIG_USB_G_SERIAL=y
+# g_serial (=y) registra su gadget y RECLAMA la UDC al boot: el configfs adb
+# encuentra la UDC ocupada ("couldn't find an available UDC") y no sale al
+# bus como 18d1:d002. Para adb lo desactivamos: el gadget adb (configfs/ffs)
+# tomará la UDC. La consola ttyGS0 vuelve después vía función acm del
+# configfs o vía adb shell.
+# CONFIG_USB_G_SERIAL is not set
 CONFIG_U_SERIAL_CONSOLE=y
 
 # gcc-monaco/gdsc fail with "Failed to register GCC clocks" when
@@ -117,6 +122,15 @@ CONFIG_BT_HCIVHCI=m
 # (El watch del ABL no se toca; esto es el WDT interno del kernel Qualcomm.)
 # CONFIG_WATCHDOG_CORE is not set
 # CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED is not set
+
+# ─── STACKPROTECTOR: compat con módulos vendor stock ───
+# Los .ko prebuilt del vendor_boot stock (Mobvoi) se compilaron con
+# STACKPROTECTOR_STRONG y necesitan __stack_chk_fail exportado (solo con
+# CONFIG_STACKPROTECTOR=y). Los otros símbolos CFI faltantes
+# (__cfi_slowpath_diag, __ubsan_handle_cfi_check_fail_abort) los cubre
+# dace-stock-stubs.patch.
+CONFIG_STACKPROTECTOR=y
+CONFIG_STACKPROTECTOR_STRONG=y
 
 # ─── WQ_WATCHDOG (workqueue watchdog del charger smblite) ───
 # CONFIG_WQ_WATCHDOG=y panicea el kernel si la workqueue del charger

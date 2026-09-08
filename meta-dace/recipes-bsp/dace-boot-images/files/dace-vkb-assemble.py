@@ -63,8 +63,8 @@ def parse_manifest(path):
                 sys.exit(f"manifest:{lineno}: missing src tag (:k or :tp) -- {raw!r}")
             name, src = line.rsplit(":", 1)
             name, src = name.strip(), src.strip()
-            if src not in ("k", "tp"):
-                sys.exit(f"manifest:{lineno}: src tag must be 'k' or 'tp', got {src!r}")
+            if src not in ("k", "tp", "stock"):
+                sys.exit(f"manifest:{lineno}: src tag must be 'k'/'tp'/'stock', got {src!r}")
             yield ("module", (name, src))
 
 
@@ -131,6 +131,9 @@ def main():
                     help="linux-dace's package/usr/lib/modules/<v>/kernel")
     ap.add_argument("--techpack-dir", required=True,
                     help="linux-dace-modules ipk-extracted root")
+    ap.add_argument("--stock-dir", default=None,
+                    help="Stock Mobvoi vendor .ko dir (for :stock sources; "
+                         "CONFIG_MODULE_FORCE_LOAD=y -> no KMI gate)")
     ap.add_argument("--symvers", required=True,
                     help="Kernel Module.symvers (for module_layout CRC)")
     ap.add_argument("--static-dir", required=True,
@@ -165,14 +168,21 @@ def main():
             name, src = payload
             if name in dropped:
                 sys.exit(f"ABORT: manifest lists {name} but @drop'd earlier")
-            roots = ([args.kernel_pkgdir] if src == "k"
-                     else [args.techpack_dir])
+            if src == "stock":
+                if not args.stock_dir:
+                    sys.exit(f"ABORT: {name} tagged :stock but no --stock-dir given")
+                roots = [args.stock_dir]
+            elif src == "k":
+                roots = [args.kernel_pkgdir]
+            else:
+                roots = [args.techpack_dir]
             ko = find_ko(roots, name)
             if not ko:
                 # Fallback search the other source. Helps catch a misclassified
                 # tag rather than failing with a generic "not built".
                 fallback = ([args.techpack_dir] if src == "k"
-                            else [args.kernel_pkgdir])
+                            else ([args.stock_dir] if src == "tp"
+                                    else [args.kernel_pkgdir]))
                 ko2 = find_ko(fallback, name)
                 hint = (f" (found in {'techpack' if src == 'k' else 'kernel-pkg'}"
                         f" -- wrong :{src} tag?)" if ko2 else "")
@@ -186,6 +196,13 @@ def main():
         shutil.copy(ko_src, dst)
         os.chmod(dst, 0o644)
         strip_debug(str(dst), args.strip)
+        if src == "stock":
+            # Stock Mobvoi built against a different .config carry a different
+            # module_layout CRC. CONFIG_MODULE_FORCE_LOAD=y in linux-dace
+            # makes the mismatch non-fatal at load (ticwatch recipe does the
+            # same with the stock prebuilts). Skip the KMI gate for them.
+            print(f"  [STOCK] {name}: KMI gate SKIPPED (CONFIG_MODULE_FORCE_LOAD)")
+            continue
         crc = module_layout_crc(str(dst))
         if crc != kcrc:
             failed.append((name, src, f"0x{crc:08x}" if crc else "none"))

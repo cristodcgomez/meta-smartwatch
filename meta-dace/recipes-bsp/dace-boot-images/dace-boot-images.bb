@@ -31,6 +31,7 @@ SRC_URI = "\
     file://static/bootconfig \
     file://static/monaco-real.dtb \
     file://static/monacop.dtb \
+    file://static/stock/qti-qbg-main.ko \
 "
 S = "${UNPACKDIR}"
 
@@ -134,6 +135,7 @@ do_compile() {
         --manifest      ${S}/dace-vkb-modules.lst \
         --kernel-pkgdir "${LINUX_DACE_PKGDIR}" \
         --techpack-dir  ${WORKDIR}/tpmod \
+        --stock-dir     ${S}/static/stock \
         --symvers       "${LINUX_DACE_SYMVERS}" \
         --static-dir    ${S}/static \
         --out           ${WORKDIR}/vkb_ramdisk
@@ -157,7 +159,22 @@ do_compile() {
     # que coincide (monacop) cae a EDL 05c6:900e (confirmado 22-08-2026 en la
     # receta ticwatch). vkb-base.dtb (aurora) ya no se usa.
     # monaco-real ya trae ramoops@9ff00000 y splash_region — no inyectar.
-    cat ${S}/static/monaco-real.dtb ${S}/static/monacop.dtb > ${WORKDIR}/dtb-blob-vendor.bin
+    # VIA1 V67-fix: forzar dr_mode=peripheral en el hijo dwc3@4e00000. Con
+    # "otg" el core espera la decisión de rol del glue (extcon/io-channels del
+    # charger); sin charger/EUD no hay cable → el dwc3 nunca sale al bus y el
+    # host no enumera (f_fs lee descriptores pero no hay señal USB física).
+    # peripheral = gadget directo, sin esperar extcon → la UDC sale al bus.
+    FDTPUT=$(find ${STAGING_BINDIR_NATIVE} -name fdtput 2>/dev/null | head -1)
+    [ -n "$FDTPUT" ] || FDTPUT=$(command -v fdtput)
+    test -n "$FDTPUT" || bbfatal "fdtput no encontrado (dtc-native)"
+    for dtb in monaco-real monacop; do
+        cp ${S}/static/${dtb}.dtb ${WORKDIR}/${dtb}-per.dtb
+        # ruta del hijo dwc3: /soc/hsusb@4e00000/dwc3@4e00000 (del dts)
+        "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb \
+            /soc/hsusb@4e00000/dwc3@4e00000 dr_mode peripheral
+        bbnote "$dtb: dr_mode=peripheral forzado en dwc3@4e00000"
+    done
+    cat ${WORKDIR}/monaco-real-per.dtb ${WORKDIR}/monacop-per.dtb > ${WORKDIR}/dtb-blob-vendor.bin
     bbnote "DTB blob vendor_boot: $(stat -c%s ${WORKDIR}/dtb-blob-vendor.bin) bytes (stock=572016)"
 
     # ─── Step 4: cpio + gzip del ramdisk ───
