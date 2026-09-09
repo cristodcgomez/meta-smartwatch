@@ -172,7 +172,15 @@ do_compile() {
         # ruta del hijo dwc3: /soc/hsusb@4e00000/dwc3@4e00000 (del dts)
         "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb \
             /soc/hsusb@4e00000/dwc3@4e00000 dr_mode peripheral
-        bbnote "$dtb: dr_mode=peripheral forzado en dwc3@4e00000"
+        # VIA1: activar el eMMC (sdhc_1). En el stock DT viene disabled — Wear
+        # OS lo activa via dtbo overlay del board; nuestro boot no aplica esos
+        # overlays. Activa + supplies (phandles ya verificados: L25A=0x132,
+        # L15A=0x182 en AMBOS dtbs). Supplies = pm5100_l25 (3.08V, del idp dtsi)
+        # y pm5100_l15 (1.8V io). Sin esto sdhci queda deferred sin mmcblk0*.
+        "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb /soc/sdhci@4744000 status ok
+        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/sdhci@4744000 vdd-supply 0x132
+        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/sdhci@4744000 vdd-io-supply 0x182
+        bbnote "$dtb: dr_mode=peripheral + sdhc_1 status ok (vdd=l25, vdd-io=l15)"
     done
     cat ${WORKDIR}/monaco-real-per.dtb ${WORKDIR}/monacop-per.dtb > ${WORKDIR}/dtb-blob-vendor.bin
     bbnote "DTB blob vendor_boot: $(stat -c%s ${WORKDIR}/dtb-blob-vendor.bin) bytes (stock=572016)"

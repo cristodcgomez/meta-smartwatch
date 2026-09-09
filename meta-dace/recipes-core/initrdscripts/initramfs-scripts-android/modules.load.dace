@@ -89,7 +89,6 @@ qcom_smd.ko
 qcom-spmi-adc5-gen3.ko
 qcom-vadc-common.ko
 nvmem_qcom-spmi-sdam.ko
-# qnoc-monaco.ko — cuelga el modprobe (~8s en, tras 82 modulos; ver init #3
 # MOD 083/116 y P3 de hybrid21). El DT T5 difiere del de aurora en la cadena
 # NoC. Se comenta SOLO qnoc (icc-rpm/qnoc-qos se mantienen: con qnoc ausente
 # no colgan en modprobe, y el resto de la cadena aurora puede progresar).
@@ -125,3 +124,10 @@ cl_dsp.ko
 cl_dsp-debugfs.ko
 input-cs40l26-i2c.ko
 snd-soc-cs40l26.ko
+# ── VIA1: qnoc-monaco AL FINAL (rpm-smd/glink ya vivos) ──
+# El qnoc aurora registra los nodos ICC y desbloquea TODO el deferred
+# (gcc/dispcc/gpucc, sdhci/eMMC, geni/i2c/spi, kgsl...). Su probe deferred
+# necesita rpm-smd: al final del listado carga limpio (verificado runtime:
+# 'Registered Monaco ICC' x6 + CQHCI). Con icc-rpm-novote.patch el voting
+# al RPM está stubbeado (crash duro a EDL sin el stub).
+qnoc-monaco.ko

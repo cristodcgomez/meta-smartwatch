@@ -1,0 +1,29 @@
+From: TicWatch Pro 5 port
+Subject: [PATCH] interconnect: icc-rpm: stub RPM voting (dace bring-up)
+
+El crash duro a EDL tras el registro de los nodos ICC del qnoc-monaco
+apunta al voting RPM (icc_set_bw -> qcom_icc_rpm_set -> qcom_icc_rpm_smd_send).
+Con este stub los drivers obtienen sus paths (deferred resuelto, eMMC vivo)
+sin tocar el RPM; el bus queda con los rates del bootloader.
+Upstream-Status: Inappropriate [dace bring-up]
+---
+
+diff --git a/drivers/interconnect/qcom/icc-rpm.c b/drivers/interconnect/qcom/icc-rpm.c
+index ffa1d16e0..6aff60c75 100644
+--- a/drivers/interconnect/qcom/icc-rpm.c
++++ b/drivers/interconnect/qcom/icc-rpm.c
+@@ -108,6 +108,14 @@ EXPORT_SYMBOL(qcom_icc_rpm_aggregate);
+  */
+ int qcom_icc_rpm_set(struct icc_node *src, struct icc_node *dst)
+ {
++	/* dace bring-up: no enviar votes al RPM. El crash duro a EDL tras el
++	 * registro de los nodos ICC apunta al voting RPM (icc_set_bw ->
++	 * qcom_icc_rpm_set -> qcom_icc_rpm_smd_send). Con este stub los drivers
++	 * obtienen sus paths (deferred resuelto, eMMC vivo) sin tocar el RPM;
++	 * el bus queda con los rates que dejó el bootloader (suficiente para
++	 * bring-up). Quitar cuando el voting RPM esté depurado. */
++	return 0;
++#pragma message("dace: qcom_icc_rpm_set STUB (sin voting RPM)")
+ 	struct qcom_icc_provider *qp;
+ 	struct qcom_icc_node *qn;
+ 	struct icc_node *n, *node;
