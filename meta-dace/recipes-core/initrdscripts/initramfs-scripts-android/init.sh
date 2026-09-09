@@ -107,7 +107,8 @@ mark "sdcard post-wait (w=${w})"
 
 if [ -e /dev/$sdcard_partition ]; then
     /sbin/fsck.ext4 -p /dev/$sdcard_partition 2>/dev/null
-    mount -t auto -o rw,noatime,nodiratime /dev/$sdcard_partition /sdcard 2>/dev/null
+    FSTYPE=${sdcard_fstype:-auto}
+    mount -t $FSTYPE -o rw,noatime,nodiratime /dev/$sdcard_partition /sdcard 2>/dev/null
     mark "mount sdcard rc=$?"
 else
     mark "NO ${sdcard_partition} — sdcard no montable"
