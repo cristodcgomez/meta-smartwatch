@@ -124,10 +124,8 @@ cl_dsp.ko
 cl_dsp-debugfs.ko
 input-cs40l26-i2c.ko
 snd-soc-cs40l26.ko
-# ── VIA1: qnoc-monaco AL FINAL (rpm-smd/glink ya vivos) ──
-# El qnoc aurora registra los nodos ICC y desbloquea TODO el deferred
-# (gcc/dispcc/gpucc, sdhci/eMMC, geni/i2c/spi, kgsl...). Su probe deferred
-# necesita rpm-smd: al final del listado carga limpio (verificado runtime:
-# 'Registered Monaco ICC' x6 + CQHCI). Con icc-rpm-novote.patch el voting
-# al RPM está stubbeado (crash duro a EDL sin el stub).
-qnoc-monaco.ko
+# ── qnoc-monaco FUERA (bring-up) ──
+# Su registro dispara un reset duro a EDL (causa sin depurar: sospechoso
+# qsmmuv500-tbu/arm-smmu en el re-probe con ICC vivo). Sin qnoc, el eMMC
+# funciona con opp-icc-tolerant.patch (paths ICC vacíos, sin bw-voting).
+# qnoc-monaco.ko

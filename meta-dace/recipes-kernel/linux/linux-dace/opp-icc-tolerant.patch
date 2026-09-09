@@ -1,0 +1,37 @@
+From: TicWatch Pro 5 port
+Subject: [PATCH] opp: tolerate missing ICC providers (dace bring-up)
+
+dev_pm_opp_of_find_icc_paths devolvia -EPROBE_DEFER cuando el provider ICC
+(qnoc-monaco) no estaba cargado -> sdhci/kgsl/drm/geni en deferred y sin eMMC.
+Sin qnoc (su registro dispara un reset duro a EDL, causa pendiente), los paths
+ICC quedan vacios y los drivers corren sin bw-voting (bus con rates del ABL).
+Upstream-Status: Inappropriate [dace bring-up]
+---
+
+diff --git a/drivers/opp/of.c b/drivers/opp/of.c
+index 3028353af..f7f27ada2 100644
+--- a/drivers/opp/of.c
++++ b/drivers/opp/of.c
+@@ -491,12 +491,16 @@ int dev_pm_opp_of_find_icc_paths(struct device *dev,
+ 	for (i = 0; i < num_paths; i++) {
+ 		paths[i] = of_icc_get_by_index(dev, i);
+ 		if (IS_ERR(paths[i])) {
+-			ret = PTR_ERR(paths[i]);
+-			if (ret != -EPROBE_DEFER) {
+-				dev_err(dev, "%s: Unable to get path%d: %d\n",
+-					__func__, i, ret);
+-			}
+-			goto err;
++			/* dace bring-up: el qnoc-monaco no esta cargado (su
++			 * registro dispara un reset duro a EDL). Dejar los paths
++			 * ICC vacios en vez de deferir: los drivers probean sin
++			 * bw-voting (el bus queda con los rates del bootloader).
++			 * Los consumidores toleran path==NULL (sdhci-msm ya lo
++			 * hace: 'Failed to get bus_scale data' es no-fatal). */
++			dev_info(dev, "%s: icc path%d no disponible (%ld) - sin bw-voting\n",
++				__func__, i, PTR_ERR(paths[i]));
++			kfree(paths);
++			return 0;
+ 		}
+ 	}
+ 
