@@ -180,7 +180,12 @@ do_compile() {
         "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb /soc/sdhci@4744000 status ok
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/sdhci@4744000 vdd-supply 0x132
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/sdhci@4744000 vdd-io-supply 0x182
-        bbnote "$dtb: dr_mode=peripheral + sdhc_1 status ok (vdd=l25, vdd-io=l15)"
+        # VIA1b: sin OPP table para el sdhci — la OPP requiere paths ICC
+        # (required-opps) y sin qnoc los paths quedan vacíos -> _opp_add_static_v2
+        # falla (-22 'opp key field not found') y el probe aborta. Sin OPP el
+        # sdhci corre con los clocks fijos del ABL (devfreq opcional).
+        "$FDTPUT" -d ${WORKDIR}/${dtb}-per.dtb /soc/sdhci@4744000 operating-points-v2
+        bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, sin OPP)"
     done
     cat ${WORKDIR}/monaco-real-per.dtb ${WORKDIR}/monacop-per.dtb > ${WORKDIR}/dtb-blob-vendor.bin
     bbnote "DTB blob vendor_boot: $(stat -c%s ${WORKDIR}/dtb-blob-vendor.bin) bytes (stock=572016)"
