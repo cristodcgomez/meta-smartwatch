@@ -213,6 +213,14 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
     mkdir -p "$BOOT_DIR/usr/lib/systemd/system/sysinit.target.wants"
     ln -sf ../init_gfs.service \
         "$BOOT_DIR/usr/lib/systemd/system/sysinit.target.wants/init_gfs.service"
+    # usb-moded no encuentra el charger (/sys/class/power_supply/usb: smblite
+    # esta fuera del boot) -> cree que no hay cable -> "mode setting failed,
+    # fallback to undefined" -> mass storage 18d1:0afe en vez de adb_mode.
+    # Con -f/--fallback ("assume always connected") entra en el modo por
+    # defecto (adb_mode, dace-defaults.ini).
+    mkdir -p $BOOT_DIR/etc/systemd/system/usb-moded.service.d
+    printf '%s\n' '[Service]' 'Environment=USB_MODED_ARGS=-f' \
+        > $BOOT_DIR/etc/systemd/system/usb-moded.service.d/10-dace-fallback.conf
     # La consola USB (ACM) y el adb del rootfs compiten por la UDC: por defecto
     # dejamos el USB al rootfs (adb). Para depurar, 'touch /sdcard/console-debug'.
     if [ -e /sdcard/console-debug ]; then
