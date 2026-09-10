@@ -138,7 +138,14 @@ fi
 # ════════════════════════════════════════════════════════════════════
 # ¿Hay systemd real? → switch_root (señal de boot completo, watchdog off)
 # ════════════════════════════════════════════════════════════════════
-if [ -x "$BOOT_DIR/lib/systemd/systemd" ]; then
+# debug-ramdisk (cmdline): quedarse en el initramfs con adb en vez de
+# switch_root. El rootfs queda montado en /loop, asi que desde el shell adb
+# se puede leer /loop/var/log (journal + android-tools-adbd.log) y parcharlo.
+DEBUG_RAMFS=0
+grep -q 'debug-ramdisk' /proc/cmdline && DEBUG_RAMFS=1
+[ "$DEBUG_RAMFS" = "1" ] && mark "debug-ramdisk: sin switch_root (adb)"
+
+if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
     mark "rootfs ok, switch_root"
     [ -e /init.machine ] && /init.machine $BOOT_DIR > /dev/kmsg 2>&1 || true
     setup_devtmpfs $BOOT_DIR
