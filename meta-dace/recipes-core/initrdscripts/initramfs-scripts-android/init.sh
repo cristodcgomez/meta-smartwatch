@@ -219,7 +219,7 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
     # Con -f/--fallback ("assume always connected") entra en el modo por
     # defecto (adb_mode, dace-defaults.ini).
     mkdir -p $BOOT_DIR/etc/systemd/system/usb-moded.service.d
-    printf '%s\n' '[Service]' 'Environment=USB_MODED_ARGS=-f' \
+    printf '%s\n' '[Service]' 'Environment=USB_MODED_ARGS=-f -D' \
         > $BOOT_DIR/etc/systemd/system/usb-moded.service.d/10-dace-fallback.conf
     # La consola USB (ACM) y el adb del rootfs compiten por la UDC: por defecto
     # dejamos el USB al rootfs (adb). Para depurar, 'touch /sdcard/console-debug'.
