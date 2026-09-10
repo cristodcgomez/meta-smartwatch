@@ -1,0 +1,158 @@
+From: TicWatch Pro 5 (dace) port
+Subject: [PATCH] iommu/arm-smmu: honor "qcom,skip-init" (dace bring-up)
+
+El kernel de google-eos (aurora/Pixel Watch) elimino el soporte de la
+propiedad downstream "qcom,skip-init", que el stock Mobvoi 5.15 y el
+monaco-gki 5.4 si tienen:
+
+    arm-smmu.c:  { ARM_SMMU_OPT_SKIP_INIT, "qcom,skip-init" },
+    arm-smmu.h:  #define ARM_SMMU_OPT_SKIP_INIT  (1 << 1)
+    arm_smmu_device_reset():
+        if (!(smmu->options & ARM_SMMU_OPT_SKIP_INIT) || hibernation)
+                <reset de SMRn/S2CRn/CBn>
+
+El DT del T5 marca apps-smmu@0xc600000 (qcom,qsmmuv500) con qcom,skip-init:
+el firmware seguro (TZ) ya lo ha programado y Linux NO debe reescribirlo.
+Sin el guard, al cargar qnoc-monaco (que registra los nodos ICC y
+desbloquea el probe de apps-smmu) el driver reescribe los 40 SMRs y los 50
+context banks de un SMMU inicializado por firmware y el SoC se resetea en
+duro a EDL, sin oops ni pstore (visto en consola USB: ultima linea
+"arm-smmu c600000.apps-smmu: Stage-1: 36-bit VA -> 36-bit IPA").
+
+Se anade ademas telemetria de color en pantalla (dace_smmu_mark) sobre el
+framebuffer de continuous-splash (0x5c000000): el panel conserva el ultimo
+contenido tras el reset, asi que el color que quede identifica el ultimo
+paso alcanzado del probe (el T5 no tiene UART).
+
+Upstream-Status: Inappropriate [dace bring-up]
+---
+diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu.c b/drivers/iommu/arm/arm-smmu/arm-smmu.c
+index b5067375dd33..a18a78eca385 100644
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu.c
+@@ -84,6 +84,35 @@ MODULE_PARM_DESC(disable_bypass,
+ 
+ static bool using_legacy_binding, using_generic_binding;
+ 
++/*
++ * dace (TicWatch Pro 5 / monaco) bring-up telemetry.
++ *
++ * Pinta la pantalla completa de un color solido sobre el continuous-splash
++ * framebuffer (splash_region@0x5c000000, RAM reservada SIN no-map -> esta en
++ * el linear map). El panel sigue mostrando el ultimo contenido tras un reset
++ * duro a EDL, asi que el color que quede en pantalla identifica el ultimo paso
++ * alcanzado. El T5 no tiene UART.
++ *
++ *   0x101010 cfg_probe start     0x00ff00 handoff_cbs start
++ *   0x0000ff cfg_probe done      0x00ffff handoff_cbs done
++ *   0xffff00 reset start         0xff00ff reset done  0xffffff probe end
++ *   0xff0000 fallo
++ */
++#define DACE_SMMU_FB_PHYS	0x5c000000ULL
++#define DACE_SMMU_FB_NPIX	(640 * 400)
++
++static void dace_smmu_mark(u32 argb)
++{
++	u32 *fb = (u32 *)phys_to_virt((phys_addr_t)DACE_SMMU_FB_PHYS);
++	size_t i;
++
++	if (!fb)
++		return;
++	for (i = 0; i < DACE_SMMU_FB_NPIX; i++)
++		fb[i] = argb;
++	mb();
++}
++
+ struct arm_smmu_option_prop {
+ 	u32 opt;
+ 	const char *prop;
+@@ -91,6 +120,7 @@ struct arm_smmu_option_prop {
+ 
+ static struct arm_smmu_option_prop arm_smmu_options[] = {
+ 	{ ARM_SMMU_OPT_FATAL_ASF, "qcom,fatal-asf" },
++	{ ARM_SMMU_OPT_SKIP_INIT, "qcom,skip-init" },
+ 	{ ARM_SMMU_OPT_3LVL_TABLES, "qcom,use-3-lvl-tables" },
+ 	{ ARM_SMMU_OPT_NO_ASID_RETENTION, "qcom,no-asid-retention" },
+ 	{ ARM_SMMU_OPT_DISABLE_ATOS, "qcom,disable-atos" },
+@@ -2831,6 +2861,18 @@ static void arm_smmu_device_reset(struct arm_smmu_device *smmu)
+ 	reg = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_sGFSR);
+ 	arm_smmu_gr0_write(smmu, ARM_SMMU_GR0_sGFSR, reg);
+ 
++	/*
++	 * dace: honrar "qcom,skip-init". El firmware seguro (TZ) ya ha
++	 * programado este SMMU (qsmmuv500) y el DT lo declara. El kernel de
++	 * google-eos NO implementa la propiedad (el stock Mobvoi 5.15 y el
++	 * monaco-gki 5.4 SI: arm_smmu_options[] + este mismo guard), asi que
++	 * reescribia SMRn/S2CRn/CBn de un SMMU ya inicializado por el firmware;
++	 * esa escritura es una violacion de seguridad y el SoC se resetea en
++	 * duro a EDL (sin oops ni pstore) en cuanto qnoc-monaco registra los ICC
++	 * y desbloquea el probe de apps-smmu. Con el guard el SMMU queda tal
++	 * como lo dejo el bootloader (que es lo que pide el DT).
++	 */
++	if (!(smmu->options & ARM_SMMU_OPT_SKIP_INIT)) {
+ #if defined CONFIG_QTI_QUIN_GVM
+ 	/*
+ 	 * Reset stream mapping groups for unused sme's: Initial values mark all SMRn as
+@@ -2860,6 +2902,7 @@ static void arm_smmu_device_reset(struct arm_smmu_device *smmu)
+ 		arm_smmu_cb_write(smmu, i, ARM_SMMU_CB_FSR, ARM_SMMU_FSR_FAULT);
+ 	}
+ #endif
++	}
+ 
+ 	/* Invalidate the TLB, just in case */
+ 	arm_smmu_gr0_write(smmu, ARM_SMMU_GR0_TLBIALLH, QCOM_DUMMY_VAL);
+@@ -3560,9 +3603,13 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
+ 	if (err)
+ 		return err;
+ 
++	dace_smmu_mark(0x00101010);	/* dace: cfg_probe start */
+ 	err = arm_smmu_device_cfg_probe(smmu);
+-	if (err)
++	if (err) {
++		dace_smmu_mark(0x00ff0000);	/* dace: cfg_probe FAIL */
+ 		goto out_power_off;
++	}
++	dace_smmu_mark(0x000000ff);	/* dace: cfg_probe done */
+ 
+ 	err = arm_smmu_parse_impl_def_registers(smmu);
+ 	if (err)
+@@ -3606,9 +3653,13 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
+ 		goto out_power_off;
+ 	smmu->phys_addr = res->start;
+ 	parse_driver_options(smmu);
++	dace_smmu_mark(0x0000ff00);	/* dace: handoff_cbs start */
+ 	err = arm_smmu_handoff_cbs(smmu);
+-	if (err)
++	if (err) {
++		dace_smmu_mark(0x00ff0000);	/* dace: handoff_cbs FAIL */
+ 		goto out_power_off;
++	}
++	dace_smmu_mark(0x0000ffff);	/* dace: handoff_cbs done */
+ 
+ 	err = iommu_device_sysfs_add(&smmu->iommu, smmu->dev, NULL,
+ 				     "smmu.%pa", &ioaddr);
+@@ -3624,9 +3675,12 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	platform_set_drvdata(pdev, smmu);
++	dace_smmu_mark(0x00ffff00);	/* dace: reset start */
+ 	arm_smmu_device_reset(smmu);
++	dace_smmu_mark(0x00ff00ff);	/* dace: reset done */
+ 	arm_smmu_test_smr_masks(smmu);
+ 	arm_smmu_interrupt_selftest(smmu);
++	dace_smmu_mark(0x00ffffff);	/* dace: probe end */
+ 
+ 	/*
+ 	 * We want to avoid touching dev->power.lock in fastpaths unless
+diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu.h b/drivers/iommu/arm/arm-smmu/arm-smmu.h
+index 5bb6e5bd2c06..1427a91570f9 100644
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu.h
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu.h
+@@ -376,6 +376,7 @@ struct arm_smmu_device {
+ 	u32				features;
+ 
+ #define ARM_SMMU_OPT_FATAL_ASF		(1 << 0)
++#define ARM_SMMU_OPT_SKIP_INIT		(1 << 1)
+ #define ARM_SMMU_OPT_3LVL_TABLES	(1 << 2)
+ #define ARM_SMMU_OPT_NO_ASID_RETENTION	(1 << 3)
+ #define ARM_SMMU_OPT_DISABLE_ATOS	(1 << 4)
