@@ -141,12 +141,14 @@ fi
 # debug-ramdisk (cmdline): quedarse en el initramfs con adb en vez de
 # switch_root. El rootfs queda montado en /loop, asi que desde el shell adb
 # se puede leer /loop/var/log (journal + android-tools-adbd.log) y parcharlo.
+# Gate SOLO por fichero. OJO: 'debug-ramdisk' NO viene del vendor_cmdline sino
+# de CONFIG_CMDLINE del kernel (linux-dace), o sea que SIEMPRE esta en
+# /proc/cmdline y mirarlo dejaria el boot siempre en el initramfs.
+# Para depurar: 'touch /sdcard/debug-ramfs' + reboot (adb desde el initramfs,
+# rootfs montado en /loop). Para boot normal: 'rm /sdcard/debug-ramfs'.
 DEBUG_RAMFS=0
-grep -q 'debug-ramdisk' /proc/cmdline && DEBUG_RAMFS=1
-# tambien por fichero: permite alternar debug/boot normal desde el shell adb
-# sin reflashear (touch/rm /sdcard/debug-ramfs).
 [ -e /sdcard/debug-ramfs ] && DEBUG_RAMFS=1
-[ "$DEBUG_RAMFS" = "1" ] && mark "debug-ramdisk: sin switch_root (adb)"
+[ "$DEBUG_RAMFS" = "1" ] && mark "debug-ramfs: sin switch_root (adb)"
 
 if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
     mark "rootfs ok, switch_root"
