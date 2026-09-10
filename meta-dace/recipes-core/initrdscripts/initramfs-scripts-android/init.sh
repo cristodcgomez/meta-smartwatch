@@ -143,6 +143,9 @@ fi
 # se puede leer /loop/var/log (journal + android-tools-adbd.log) y parcharlo.
 DEBUG_RAMFS=0
 grep -q 'debug-ramdisk' /proc/cmdline && DEBUG_RAMFS=1
+# tambien por fichero: permite alternar debug/boot normal desde el shell adb
+# sin reflashear (touch/rm /sdcard/debug-ramfs).
+[ -e /sdcard/debug-ramfs ] && DEBUG_RAMFS=1
 [ "$DEBUG_RAMFS" = "1" ] && mark "debug-ramdisk: sin switch_root (adb)"
 
 if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
