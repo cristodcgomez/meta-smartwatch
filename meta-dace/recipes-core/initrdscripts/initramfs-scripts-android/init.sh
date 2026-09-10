@@ -207,6 +207,12 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
             info "unmasked $u"
         fi
     done
+    # Restaurar el enable symlink de init_gfs: sin el no existe
+    # /config/usb_gadget/g1 y usb-moded (activado por dsme/usbtracker via D-Bus)
+    # aborta en configfs_probe -> no hay gadget USB ni adb.
+    mkdir -p "$BOOT_DIR/usr/lib/systemd/system/sysinit.target.wants"
+    ln -sf ../init_gfs.service \
+        "$BOOT_DIR/usr/lib/systemd/system/sysinit.target.wants/init_gfs.service"
     # La consola USB (ACM) y el adb del rootfs compiten por la UDC: por defecto
     # dejamos el USB al rootfs (adb). Para depurar, 'touch /sdcard/console-debug'.
     if [ -e /sdcard/console-debug ]; then
