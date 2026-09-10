@@ -185,6 +185,18 @@ DEBUG_RAMFS=0
 [ "$DEBUG_RAMFS" = "1" ] && mark "debug-ramfs: sin switch_root (adb)"
 
 if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
+    # Bring-up: qnoc-monaco NO debe cargarse en el rootfs. systemd-udevd lo
+    # auto-carga por modalias (of:...Cqcom,qnoc...) -> registra los ICC ->
+    # desbloquea el re-probe de arm-smmu/qsmmuv500-tbu/kgsl durante el coldplug
+    # -> RESET DURO A EDL (visto por la consola USB: la ultima linea era
+    # "arm-smmu c600000.apps-smmu: probing hardware configuration...").
+    # Se escribe el blacklist en el rootfs en cada boot (no depende de parchear
+    # la imagen ya flasheada).
+    mkdir -p $BOOT_DIR/etc/modprobe.d
+    printf '%s\n' \
+        'blacklist qnoc-monaco' \
+        'install qnoc-monaco /bin/true' \
+        > $BOOT_DIR/etc/modprobe.d/00-dace-no-qnoc.conf
     setup_usb_console
     mark "rootfs ok, switch_root"
     [ -e /init.machine ] && /init.machine $BOOT_DIR > /dev/kmsg 2>&1 || true
