@@ -197,7 +197,22 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
         'blacklist qnoc-monaco' \
         'install qnoc-monaco /bin/true' \
         > $BOOT_DIR/etc/modprobe.d/00-dace-no-qnoc.conf
-    setup_usb_console
+    # Desenmascarar el USB del rootfs (un boot de debug anterior pudo
+    # enmascararlo para proteger la consola). Con esto usb-moded del rootfs
+    # levanta adb (fix PREFERRED_PROVIDER android-tools-conf-configfs).
+    for u in init_gfs.service usb-moded.service android-tools-adbd.service adbd-prepare.service; do
+        f="$BOOT_DIR/etc/systemd/system/$u"
+        if [ -L "$f" ] && [ "$(readlink $f 2>/dev/null)" = "/dev/null" ]; then
+            rm -f "$f"
+            info "unmasked $u"
+        fi
+    done
+    # La consola USB (ACM) y el adb del rootfs compiten por la UDC: por defecto
+    # dejamos el USB al rootfs (adb). Para depurar, 'touch /sdcard/console-debug'.
+    if [ -e /sdcard/console-debug ]; then
+        setup_usb_console
+        mark "console-debug: consola (sin adb)"
+    fi
     mark "rootfs ok, switch_root"
     [ -e /init.machine ] && /init.machine $BOOT_DIR > /dev/kmsg 2>&1 || true
     setup_devtmpfs $BOOT_DIR
