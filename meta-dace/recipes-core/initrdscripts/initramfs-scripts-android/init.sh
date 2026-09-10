@@ -136,6 +136,40 @@ if [ ! -e $vendor_partition ] && [ -n "$vendor_partition" ] && [ -e /dev/$vendor
 fi
 
 # ════════════════════════════════════════════════════════════════════
+# Consola del kernel por USB (configfs ACM). El kernel ya trae
+# CONFIG_USB_CONFIGFS_ACM=y + CONFIG_U_SERIAL_CONSOLE=y y el cmdline lleva
+# "console=ttyGS0,115200": un gadget ACM con el puerto 0 crea /dev/ttyGS0 y el
+# host ve /dev/ttyACM0 con el log del kernel. Sirve para ver el boot del rootfs
+# (el journal no da tiempo a sincronizar si hay reset duro a EDL).
+# ════════════════════════════════════════════════════════════════════
+setup_usb_console() {
+    G=/sys/kernel/config/usb_gadget
+    mkdir -p /sys/kernel/config
+    mount -t configfs none /sys/kernel/config 2>/dev/null
+    for u in $G/*/UDC; do
+        [ -e "$u" ] || continue
+        [ -n "$(cat $u 2>/dev/null)" ] && echo "" > "$u" 2>/dev/null
+    done
+    mkdir -p $G/console
+    cd $G/console 2>/dev/null || return
+    echo 0x18d1 > idVendor
+    echo 0x4ee7 > idProduct
+    mkdir -p strings/0x409
+    echo "dace-console" > strings/0x409/serialnumber
+    echo "AsteroidOS"   > strings/0x409/manufacturer
+    echo "dace-console" > strings/0x409/product
+    mkdir -p configs/c.1/strings/0x409
+    echo "acm" > configs/c.1/strings/0x409/configuration
+    mkdir -p functions/acm.usb0
+    ln -sf functions/acm.usb0 configs/c.1/acm.usb0
+    UDC=$(ls /sys/class/udc 2>/dev/null | sed -n 1p)
+    [ -n "$UDC" ] && echo "$UDC" > UDC
+    cd /
+    ptext "console: UDC=${UDC:-none}"
+    info "console: UDC=${UDC:-none}"
+}
+
+# ════════════════════════════════════════════════════════════════════
 # ¿Hay systemd real? → switch_root (señal de boot completo, watchdog off)
 # ════════════════════════════════════════════════════════════════════
 # debug-ramdisk (cmdline): quedarse en el initramfs con adb en vez de
@@ -151,6 +185,7 @@ DEBUG_RAMFS=0
 [ "$DEBUG_RAMFS" = "1" ] && mark "debug-ramfs: sin switch_root (adb)"
 
 if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
+    setup_usb_console
     mark "rootfs ok, switch_root"
     [ -e /init.machine ] && /init.machine $BOOT_DIR > /dev/kmsg 2>&1 || true
     setup_devtmpfs $BOOT_DIR
