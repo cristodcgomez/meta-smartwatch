@@ -286,6 +286,14 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
     # para obtener dominio IOMMU. Si quedara un blacklist de un boot anterior,
     # borrarlo (el modulo ya esta cargado, pero el archivo confunde).
     rm -f $BOOT_DIR/etc/modprobe.d/00-dace-no-qnoc.conf
+    # mce: quitar el filtro de brillo por sensor de luz (ALS). El T5 no tiene
+    # ALS funcional (sensorfwd entra en crash-loop y el sensor de proximidad da
+    # datos basura por evdev), y con el filtro activo mce cae al perfil mas
+    # oscuro (LevelsProfile0 empieza en 1%) -> podria forzar el brillo a ~0.
+    if [ -f "$BOOT_DIR/etc/mce/10mce.ini" ] && grep -q "filter-brightness-als" "$BOOT_DIR/etc/mce/10mce.ini"; then
+        sed -i 's/filter-brightness-als;//; s/;filter-brightness-als//' "$BOOT_DIR/etc/mce/10mce.ini"
+        info "mce: filtro ALS quitado (T5 sin ALS funcional)"
+    fi
     # Desenmascarar el USB del rootfs (un boot de debug anterior pudo
     # enmascararlo para proteger la consola). Con esto usb-moded del rootfs
     # levanta adb (fix PREFERRED_PROVIDER android-tools-conf-configfs).
