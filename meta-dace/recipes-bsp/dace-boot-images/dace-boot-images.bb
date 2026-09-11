@@ -204,6 +204,18 @@ do_compile() {
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb \
             /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
             vddo-supply 0x83
+        # zinitix_init_input_dev() llama a touchscreen_parse_properties(), que
+        # exige las props ESTANDAR touchscreen-size-x/y; el DT del T5 solo trae
+        # las del vendor (zinitix,x_resolution/y_resolution = 0x1d1 = 465, que es
+        # justo la resolucion del panel). Sin esto:
+        #   "Touchscreen-size-x and/or touchscreen-size-y not set in dts"
+        #   probe failed with error -22
+        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb \
+            /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
+            touchscreen-size-x 0x1d1
+        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb \
+            /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
+            touchscreen-size-y 0x1d1
         bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, sin OPP) + tactil zinitix bt541"
     done
     cat ${WORKDIR}/monaco-real-per.dtb ${WORKDIR}/monacop-per.dtb > ${WORKDIR}/dtb-blob-vendor.bin
