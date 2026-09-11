@@ -223,24 +223,28 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
         > $BOOT_DIR/etc/systemd/system/usb-moded.service.d/10-dace-fallback.conf
     # La consola USB (ACM) y el adb del rootfs compiten por la UDC: por defecto
     # dejamos el USB al rootfs (adb). Para depurar, 'touch /sdcard/console-debug'.
+    # ── LOTE DE DIAGNOSTICO: consola USB + carga de qnoc-monaco (one-shot) ──
+    # No usa marcadores en /sdcard: en el rootfs /sdcard NO es accesible (es el
+    # punto de montaje del initramfs) y crearlos requeriria otro lote. La marca
+    # de "ya hecho" se escribe en el ROOTFS (montado en $BOOT_DIR), que
+    # persiste: el PRIMER arranque con este lote hace la prueba y los
+    # siguientes arrancan normal -> si el SoC se resetea a EDL no hay boot-loop
+    # (basta un apagado/encendido).
+    if [ ! -e "$BOOT_DIR/etc/dace-qnoc-test-done" ]; then
+        : > "$BOOT_DIR/etc/dace-qnoc-test-done"
+        sync
+        setup_usb_console
+        sleep 3
+        mark "TEST: consola arriba, modprobe qnoc-monaco"
+        modprobe qnoc-monaco 2>/dev/kmsg
+        info "TEST: modprobe qnoc-monaco rc=$?"
+        mark "TEST: modprobe hecho (espero 20s)"
+        sleep 20
+        mark "TEST: SIGUE VIVO (NO hubo reset)"
+    fi
     if [ -e /sdcard/console-debug ]; then
         setup_usb_console
         mark "console-debug: consola (sin adb)"
-    fi
-    # ── Prueba one-shot: cargar qnoc-monaco con la consola ya arriba ──
-    # El blacklist de arriba solo afecta al rootfs; aqui seguimos en el ramfs,
-    # donde los .ko estan planos en /lib/modules y modprobe no tiene blacklist.
-    # El marcador se BORRA antes del insmod, asi que si el SoC se resetea a EDL
-    # el siguiente arranque es normal (sin boot-loop).
-    # Uso: touch /sdcard/console-debug /sdcard/qnoc-now && reboot
-    if [ -e /sdcard/qnoc-now ]; then
-        rm -f /sdcard/qnoc-now
-        mark "qnoc-now: modprobe qnoc-monaco"
-        modprobe qnoc-monaco 2>/dev/kmsg
-        info "qnoc-now: modprobe rc=$?"
-        mark "qnoc-now: modprobe hecho (esperando 20s)"
-        sleep 20
-        mark "qnoc-now: SIGUE VIVO (NO hubo reset)"
     fi
     mark "rootfs ok, switch_root"
     [ -e /init.machine ] && /init.machine $BOOT_DIR > /dev/kmsg 2>&1 || true
