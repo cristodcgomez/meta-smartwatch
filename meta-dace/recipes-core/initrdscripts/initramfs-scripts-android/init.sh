@@ -402,13 +402,17 @@ mark "NO rootfs — adb desde ramfs"
 # que haya adb. (El journal es binario: se tira lo no imprimible.)
 # ════════════════════════════════════════════════════════════════════
 if [ -d /loop/var/log/journal ]; then
-    mark "JOURNAL: ultimos mensajes del arranque anterior"
-    for j in $(ls -t /loop/var/log/journal/*/system.journal* 2>/dev/null | sed -n 1,2p); do
-        info "JOURNAL: --- $(basename $j) ---"
-        tail -c 400000 "$j" 2>/dev/null | tr -c '[:print:]' '\n' \
-            | grep -aE '^.{12,}' | tail -n 60 > /dev/kmsg 2>/dev/null
-    done
-    mark "JOURNAL: fin del volcado"
+    J=$(ls -t /loop/var/log/journal/*/system.journal* 2>/dev/null | sed -n 1p)
+    if [ -n "$J" ]; then
+        mark "JOURNAL: ultimos mensajes de $(basename $(dirname $J))"
+        # /dev/console NO pasa por printk, asi que no hay ratelimiting (por
+        # /dev/kmsg ya vimos '9 output lines suppressed' y se perderia el
+        # volcado). En segundo plano por si el tty no drena.
+        ( tail -c 500000 "$J" 2>/dev/null | tr -c '[:print:]' '\n' \
+              | grep -aE '^.{12,}' | tail -n 80 > /dev/console 2>&1 ) &
+        sleep 3
+        mark "JOURNAL: fin del volcado"
+    fi
 fi
 
 # ════════════════════════════════════════════════════════════════════
