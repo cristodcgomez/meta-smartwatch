@@ -227,6 +227,21 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
         setup_usb_console
         mark "console-debug: consola (sin adb)"
     fi
+    # ── Prueba one-shot: cargar qnoc-monaco con la consola ya arriba ──
+    # El blacklist de arriba solo afecta al rootfs; aqui seguimos en el ramfs,
+    # donde los .ko estan planos en /lib/modules y modprobe no tiene blacklist.
+    # El marcador se BORRA antes del insmod, asi que si el SoC se resetea a EDL
+    # el siguiente arranque es normal (sin boot-loop).
+    # Uso: touch /sdcard/console-debug /sdcard/qnoc-now && reboot
+    if [ -e /sdcard/qnoc-now ]; then
+        rm -f /sdcard/qnoc-now
+        mark "qnoc-now: modprobe qnoc-monaco"
+        modprobe qnoc-monaco 2>/dev/kmsg
+        info "qnoc-now: modprobe rc=$?"
+        mark "qnoc-now: modprobe hecho (esperando 20s)"
+        sleep 20
+        mark "qnoc-now: SIGUE VIVO (NO hubo reset)"
+    fi
     mark "rootfs ok, switch_root"
     [ -e /init.machine ] && /init.machine $BOOT_DIR > /dev/kmsg 2>&1 || true
     setup_devtmpfs $BOOT_DIR
