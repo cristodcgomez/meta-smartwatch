@@ -30,7 +30,10 @@ fi
 
 # Sin metadata LP no hay Wear OS que mapear: no es un error fatal (permite
 # arrancar en un T5 con el super vacio).
-if [ "$(dd if=$SUPER bs=1 skip=4096 count=4 2>/dev/null | od -An -tx4 | tr -d ' ')" != "67446c61" ]; then
+# Comparar con los BYTES ("gDla") -- NO con 'od -tx4', que en little-endian los
+# da al reves (616c4467): con esa comparacion el script salia exit 0 sin crear
+# NADA y dace-vendor-mount parecia OK (bug detectado en el reloj).
+if [ "$(dd if=$SUPER bs=1 skip=4096 count=4 2>/dev/null)" != "gDla" ]; then
     echo "dace-vendor-mount: $SUPER sin metadata LP (geometria ausente), nada que hacer"
     exit 0
 fi

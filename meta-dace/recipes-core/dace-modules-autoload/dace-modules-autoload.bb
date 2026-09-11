@@ -8,13 +8,19 @@ LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 COMPATIBLE_MACHINE = "dace"
 
-SRC_URI = "file://dace-post-rootfs.conf"
+SRC_URI = "file://dace-post-rootfs.conf \
+           file://dace-vendor-blacklist.conf"
 
 do_install() {
     install -d -m 0755 ${D}${sysconfdir}/modules-load.d
     install -m 0644 ${UNPACKDIR}/dace-post-rootfs.conf ${D}${sysconfdir}/modules-load.d/dace-post-rootfs.conf
+    # Los modulos vendor los carga udev (no modules-load) y tumban el SoC: se
+    # bloquean con modprobe.d (ver el comentario del propio fichero).
+    install -d -m 0755 ${D}${sysconfdir}/modprobe.d
+    install -m 0644 ${UNPACKDIR}/dace-vendor-blacklist.conf ${D}${sysconfdir}/modprobe.d/00-dace-vendor-blacklist.conf
 }
 
-FILES:${PN} = "${sysconfdir}/modules-load.d/dace-post-rootfs.conf"
+FILES:${PN} = "${sysconfdir}/modules-load.d/dace-post-rootfs.conf \
+               ${sysconfdir}/modprobe.d/00-dace-vendor-blacklist.conf"
 
 RDEPENDS:${PN} = "linux-dace-modules"

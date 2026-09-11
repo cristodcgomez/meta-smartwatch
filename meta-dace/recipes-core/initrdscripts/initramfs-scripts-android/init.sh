@@ -207,7 +207,11 @@ BOOT_DIR="/sdcard"
 if [ -e $ANDROID_MEDIA_DIR/asteroidos.ext4 ] ; then
     mark "rootfs found"
     /sbin/fsck.ext4 -p $ANDROID_MEDIA_DIR/asteroidos.ext4 2>/dev/null
-    mount -o noatime,nodiratime,sync,rw,loop $ANDROID_MEDIA_DIR/asteroidos.ext4 /loop 2>/dev/null \
+    # OJO: SIN 'sync' en el montaje. Con sync cada escritura va sincrona al
+    # eMMC via loop+f2fs y systemd acaba bloqueado en un lock de inodo
+    # (`locks_lock_inode_wait`): systemctl deja de responder. Se detecto al
+    # arrancar el contenedor LXC con un crashlog escribiendo 20 KB/s.
+    mount -o noatime,nodiratime,rw,loop $ANDROID_MEDIA_DIR/asteroidos.ext4 /loop 2>/dev/null \
       && BOOT_DIR="/loop"
 fi
 
@@ -381,6 +385,27 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
         mark "nolxc: dace-lxc-android enmascarado"
     fi
     mark "rootfs ok, switch_root"
+    # ── CRASHLOG A PRUEBA DE BALAS ──────────────────────────────────
+    # Lanzado DESDE EL INITRAMFS, no depende de que arranque ningun unit de
+    # systemd (el dace-crashlog.service no llego a arrancar y perdimos el
+    # crash). El proceso sigue vivo tras switch_root y sigue escribiendo en el
+    # rootfs (los mounts siguen en la tabla: $BOOT_DIR sigue resolviendo), asi
+    # que el ultimo segundo de dmesg queda EN DISCO cuando el SoC resetea a
+    # EDL (el rootfs va montado con 'sync'). Solo en modo debug, para no
+    # castigar la eMMC en arranques normales.
+    if [ -n "$DEBUG_MODE" ]; then
+        (
+            while true; do
+                {
+                    echo "########## uptime=$(cut -d' ' -f1 /proc/uptime 2>/dev/null)s ##########"
+                    dmesg 2>/dev/null | tail -300
+                } > $BOOT_DIR/var/log/dace-crash.tmp 2>/dev/null
+                mv $BOOT_DIR/var/log/dace-crash.tmp $BOOT_DIR/var/log/dace-crash.log 2>/dev/null
+                sleep 1
+            done
+        ) &
+        mark "crashlog del initramfs lanzado -> $BOOT_DIR/var/log/dace-crash.log"
+    fi
     [ -e /init.machine ] && /init.machine $BOOT_DIR > /dev/kmsg 2>&1 || true
     setup_devtmpfs $BOOT_DIR
     umount -l /proc 2>/dev/null; umount -l /sys 2>/dev/null
