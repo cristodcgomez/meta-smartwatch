@@ -199,18 +199,11 @@ DEBUG_RAMFS=0
 [ "$DEBUG_RAMFS" = "1" ] && mark "debug-ramfs: sin switch_root (adb)"
 
 if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
-    # Bring-up: qnoc-monaco NO debe cargarse en el rootfs. systemd-udevd lo
-    # auto-carga por modalias (of:...Cqcom,qnoc...) -> registra los ICC ->
-    # desbloquea el re-probe de arm-smmu/qsmmuv500-tbu/kgsl durante el coldplug
-    # -> RESET DURO A EDL (visto por la consola USB: la ultima linea era
-    # "arm-smmu c600000.apps-smmu: probing hardware configuration...").
-    # Se escribe el blacklist en el rootfs en cada boot (no depende de parchear
-    # la imagen ya flasheada).
-    mkdir -p $BOOT_DIR/etc/modprobe.d
-    printf '%s\n' \
-        'blacklist qnoc-monaco' \
-        'install qnoc-monaco /bin/true' \
-        > $BOOT_DIR/etc/modprobe.d/00-dace-no-qnoc.conf
+    # qnoc-monaco YA NO se blacklistea: se carga en el initramfs (ver
+    # modules.load.dace) porque msm_smmu_probe() necesita el apps-smmu arriba
+    # para obtener dominio IOMMU. Si quedara un blacklist de un boot anterior,
+    # borrarlo (el modulo ya esta cargado, pero el archivo confunde).
+    rm -f $BOOT_DIR/etc/modprobe.d/00-dace-no-qnoc.conf
     # Desenmascarar el USB del rootfs (un boot de debug anterior pudo
     # enmascararlo para proteger la consola). Con esto usb-moded del rootfs
     # levanta adb (fix PREFERRED_PROVIDER android-tools-conf-configfs).
@@ -244,8 +237,8 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
     # persiste: el PRIMER arranque con este lote hace la prueba y los
     # siguientes arrancan normal -> si el SoC se resetea a EDL no hay boot-loop
     # (basta un apagado/encendido).
-    if [ ! -e "$BOOT_DIR/etc/dace-qnoc-test-v6-done" ]; then
-        : > "$BOOT_DIR/etc/dace-qnoc-test-v6-done"
+    if [ ! -e "$BOOT_DIR/etc/dace-qnoc-test-v7-done" ]; then
+        : > "$BOOT_DIR/etc/dace-qnoc-test-v7-done"
         sync
         setup_usb_console
         sleep 3
@@ -263,14 +256,14 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
             echo "-- qnoc/icc cargados:"
             grep -E "qnoc_monaco|qnoc_qos_rpm|icc_rpm" /proc/modules | cut -d' ' -f1,2
             echo "-- qnoc provider en /sys/class/interconnect:"
-            ls /sys/class/interconnect 2>&1 | head -5
+            ls /sys/class/interconnect 2>&1 | sed -n 1,5p
             echo "-- /dev/dri:"; ls -la /dev/dri 2>&1
             echo "-- /dev/fb*:"; ls -la /dev/fb* 2>&1
             echo "-- /sys/class/drm:"; ls /sys/class/drm 2>&1
             echo "-- drm status:"
             cat /sys/class/drm/*/status 2>/dev/null | tr '\n' ' '; echo
             echo "-- diferidos:"
-            cat /sys/kernel/debug/devices_deferred 2>&1 | head -25
+            cat /sys/kernel/debug/devices_deferred 2>&1 | sed -n 1,25p
             echo "-- dmesg (drm/sde/kgsl/smmu):"
             dmesg | grep -iE "msm_drm|msm |sde|drm|kgsl|apps-smmu|SMMUv2|iommu" | tail -30
             echo "===== DACE TEST DUMP FIN ====="

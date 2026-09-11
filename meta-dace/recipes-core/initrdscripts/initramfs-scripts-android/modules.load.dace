@@ -89,10 +89,18 @@ qcom_smd.ko
 qcom-spmi-adc5-gen3.ko
 qcom-vadc-common.ko
 nvmem_qcom-spmi-sdam.ko
-# MOD 083/116 y P3 de hybrid21). El DT T5 difiere del de aurora en la cadena
-# NoC. Se comenta SOLO qnoc (icc-rpm/qnoc-qos se mantienen: con qnoc ausente
-# no colgan en modprobe, y el resto de la cadena aurora puede progresar).
-# qnoc-monaco.ko
+# qnoc-monaco: IMPRESCINDIBLE y AHORA SI (estuvo blacklisted durante el
+# bring-up). Es el proveedor ICC del que dependen msm_drm (qcom,sde-reg-bus) y
+# el apps-smmu (via interconnects). Tiene que cargarse ANTES que msm_drm:
+# msm_smmu_probe() (driver de smmu_sde_unsec_cb, dentro de msm_drm.ko) hace
+# iommu_get_domain_for_dev() y si no hay dominio devuelve -EINVAL -¡no
+# -EPROBE_DEFER!-, asi que si el apps-smmu aun no esta, el componente nunca se
+# añade y msm_drm_bind() no crea /dev/dri (sin display).
+# El reset duro a EDL que obligo a quitarlo esta resuelto: arm-smmu honra
+# qcom,skip-init (arm-smmu-skip-init.patch) y ademas marca la tabla SMR/S2CR
+# del firmware como en uso (si no se marcaba, Linux pisaba la del eMMC ->
+# 'mmc0: ADMA error' -> EDL).
+qnoc-monaco.ko
 icc-rpm.ko
 qnoc-qos-rpm.ko
 qrtr.ko
@@ -124,8 +132,4 @@ cl_dsp.ko
 cl_dsp-debugfs.ko
 input-cs40l26-i2c.ko
 snd-soc-cs40l26.ko
-# ── qnoc-monaco FUERA (bring-up) ──
-# Su registro dispara un reset duro a EDL (causa sin depurar: sospechoso
-# qsmmuv500-tbu/arm-smmu en el re-probe con ICC vivo). Sin qnoc, el eMMC
-# funciona con opp-icc-tolerant.patch (paths ICC vacíos, sin bw-voting).
-# qnoc-monaco.ko
+# (qnoc-monaco ya se carga arriba, antes de msm_drm)
