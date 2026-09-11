@@ -394,6 +394,24 @@ fi
 mark "NO rootfs — adb desde ramfs"
 
 # ════════════════════════════════════════════════════════════════════
+# VOLCADO DEL JOURNAL DEL ARRANQUE QUE FALLO
+# En modo debug el rootfs esta montado en /loop y journald es persistente
+# (Storage=persistent en init.sh), asi que los ultimos mensajes del arranque
+# que se fue a EDL estan en /loop/var/log/journal. Se vuelca el final del
+# journal en texto legible a la consola: asi la evidencia sale SIN depender de
+# que haya adb. (El journal es binario: se tira lo no imprimible.)
+# ════════════════════════════════════════════════════════════════════
+if [ -d /loop/var/log/journal ]; then
+    mark "JOURNAL: ultimos mensajes del arranque anterior"
+    for j in $(ls -t /loop/var/log/journal/*/system.journal* 2>/dev/null | sed -n 1,2p); do
+        info "JOURNAL: --- $(basename $j) ---"
+        tail -c 400000 "$j" 2>/dev/null | tr -c '[:print:]' '\n' \
+            | grep -aE '^.{12,}' | tail -n 60 > /dev/kmsg 2>/dev/null
+    done
+    mark "JOURNAL: fin del volcado"
+fi
+
+# ════════════════════════════════════════════════════════════════════
 # Sin rootfs: intentar el gadget USB/adb.
 # La phy ya completó (PH=43) y el glue G7; si UDC aparece, esto da adb.
 # ════════════════════════════════════════════════════════════════════
@@ -401,11 +419,16 @@ mkdir -p /sys/kernel/config
 mount -t configfs none /sys/kernel/config 2>/dev/null
 
 ZU=.sbu
-# La consola ACM (setup_usb_console, arriba) ya tiene la UDC enganchada y la
-# UDC es UNA: hay que soltarla antes de enganchar el gadget de adb, si no el
-# `echo $UDC > .../adb/UDC` falla y el ramfs se queda SIN adb (justo lo que
-# hace falta para leer el journal del rootfs).
-: > /sys/kernel/config/usb_gadget/console/UDC 2>/dev/null
+# Soltar la UDC de CUALQUIER gadget antes de enganchar el de adb. La consola
+# ACM (setup_usb_console, arriba) ya la tiene cogida y la UDC es UNA. OJO: hay
+# que escribir de verdad algo (un newline); ': > UDC' escribe 0 bytes y el
+# store de configfs NO se llama -> la UDC sigue ocupada y adb no engancha
+# (era exactamente el fallo: el reloj se quedaba con el gadget de la consola y
+# sin adb).
+for _u in /sys/kernel/config/usb_gadget/*/UDC; do
+    [ -e "$_u" ] || continue
+    echo "" > "$_u" 2>/dev/null && mark "release $(basename $(dirname $_u))"
+done
 sleep 1
 /usr/bin/android-gadget-setup adb 2>/dev/null && mark "gadget-setup ok" || mark "gadget-setup fail"
 # legacy android_usb (no-op en GKI pero por compat)
@@ -434,6 +457,14 @@ if [ -n "$UDC" ]; then
     mark "UDC bind ${UDC}"
 else
     mark "NO UDC after 30s"
+fi
+
+# Respaldo SIEMPRE disponible: una shell interactiva por la consola del kernel
+# (/dev/ttyGS0; en el host: 'sudo picocom -b 115200 /dev/ttyACM0'). Sirve
+# aunque el adb no enganche, y comparte tty con los mensajes del kernel.
+if [ -c /dev/ttyGS0 ]; then
+    mark "consola: shell de respaldo en ttyGS0"
+    (setsid sh -i </dev/ttyGS0 >/dev/ttyGS0 2>&1 &) 2>/dev/null
 fi
 
 # ════════════════════════════════════════════════════════════════════
