@@ -244,8 +244,8 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
     # persiste: el PRIMER arranque con este lote hace la prueba y los
     # siguientes arrancan normal -> si el SoC se resetea a EDL no hay boot-loop
     # (basta un apagado/encendido).
-    if [ ! -e "$BOOT_DIR/etc/dace-qnoc-test-v4-done" ]; then
-        : > "$BOOT_DIR/etc/dace-qnoc-test-v4-done"
+    if [ ! -e "$BOOT_DIR/etc/dace-qnoc-test-v5-done" ]; then
+        : > "$BOOT_DIR/etc/dace-qnoc-test-v5-done"
         sync
         setup_usb_console
         sleep 3
