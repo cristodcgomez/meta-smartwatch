@@ -270,29 +270,30 @@ service servicemanager /system/bin/servicemanager
     shutdown critical
 RC
 
-# system_dlkm (kernel modules for the Android container) -- UBPorts
-# mounts /dev/mapper/system_dlkm_b at $ROOTFS/system_dlkm. The
-# dm device is created by dace-vendor-mount.service.
-if [ -b /dev/mapper/system_dlkm_b ] && [ -d $ROOTFS/system_dlkm ]; then
+# system_dlkm (kernel modules for the Android container) -- mounted at
+# $ROOTFS/system_dlkm. El dm device lo crea dace-vendor-mount.service.
+# (En el T5 es un solo device sin sufijo _b, a diferencia del PW2.)
+if [ -b /dev/mapper/system_dlkm ] && [ -d $ROOTFS/system_dlkm ]; then
     if ! mountpoint -q $ROOTFS/system_dlkm; then
-        mount -o ro /dev/mapper/system_dlkm_b $ROOTFS/system_dlkm 2>/dev/null && \
+        mount -o ro /dev/mapper/system_dlkm $ROOTFS/system_dlkm 2>/dev/null && \
             echo "dace-lxc-android: mounted /system_dlkm"
     fi
 fi
 
-# /metadata partition (Android-style)
-if [ -b /dev/mmcblk0p54 ] && [ -d $ROOTFS/metadata ]; then
+# /metadata partition (Android-style). T5: p24 (p54 es init_boot).
+if [ -b /dev/mmcblk0p24 ] && [ -d $ROOTFS/metadata ]; then
     if ! mountpoint -q $ROOTFS/metadata; then
-        mount -o noatime,nosuid,nodev,discard /dev/mmcblk0p54 $ROOTFS/metadata && \
+        mount -o noatime,nosuid,nodev,discard /dev/mmcblk0p24 $ROOTFS/metadata && \
             echo "dace-lxc-android: mounted /metadata"
     fi
 fi
 
-# Vendor firmware (vfat partition at p44, mounted INSIDE vendor)
-if [ -b /dev/mmcblk0p44 ] && [ -d $ROOTFS/vendor/firmware_mnt ]; then
+# Vendor firmware (vfat partition mounted INSIDE vendor). T5: p14 = modem,
+# que es un VFAT con image/ (modem.mdt + modem.b*) y verinfo.
+if [ -b /dev/mmcblk0p14 ] && [ -d $ROOTFS/vendor/firmware_mnt ]; then
     if ! mountpoint -q $ROOTFS/vendor/firmware_mnt; then
         mount -t vfat -o ro,uid=1000,gid=1000,fmask=0337,dmask=0227 \
-            /dev/mmcblk0p44 $ROOTFS/vendor/firmware_mnt 2>/dev/null && \
+            /dev/mmcblk0p14 $ROOTFS/vendor/firmware_mnt 2>/dev/null && \
             echo "dace-lxc-android: mounted vendor firmware_mnt"
     fi
 fi

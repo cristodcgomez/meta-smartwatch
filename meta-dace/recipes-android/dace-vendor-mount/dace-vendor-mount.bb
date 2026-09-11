@@ -1,13 +1,14 @@
 SUMMARY = "Recreate the dm-linear mappings for the T5's /super partitions and mount them"
-DESCRIPTION = "On stock Android-13/Halium-13, dace's vendor partition is a \
-logical partition packed inside /super (/dev/mmcblk0p80 on slot B). Android \
-first-stage init parses LP metadata and creates /dev/mapper/vendor_b via dm-linear; \
-our shell-script initramfs doesn't, and the Android-9 init we ship at \
-/usr/libexec/hal-droid/system/bin/init pre-dates dynamic partitions and \
-can't either. Workaround: hardcode the dm table observed from a working \
-UBPorts install (dmsetup table | grep vendor_b), recreate it at boot \
-before android-init runs. Avoids duplicating ~234 MB of vendor data into \
-our rootfs.img."
+DESCRIPTION = "El T5 (TicWatch Pro 5, monaco/SW5100) lleva Wear OS 13 con \
+particiones dinamicas: system/vendor/product/system_ext/vendor_dlkm/system_dlkm \
+viven dentro de /super (/dev/mmcblk0p7, 4 GiB) y Android las expone con \
+dm-linear desde su first-stage init. Nuestro initramfs es un shell script que \
+no parsea la metadata LP, asi que el servicio recrea las tablas (leidas con \
+lpdump de la metadata real del super del T5, geometria en el offset 4096) y \
+monta los devices en /android/* -- que es lo que el contenedor LXC bind-montea \
+dentro de su rootfs -- mas los symlinks /vendor -> /android/vendor y \
+/system -> /var/lib/lxc/android/rootfs/system que esperan Halium y libhybris. \
+Sin esto el launcher aborta con 'failed to find/load gralloc'."
 
 LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0-only;md5=c79ff39f19dfec6d293b95dea7b07891"
