@@ -197,6 +197,13 @@ do_compile() {
         "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb \
             /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
             compatible "zinitix,zinitix-ts" "zinitix,bt541"
+        # El driver mainline pide DOS reguladores con regulator_bulk_get
+        # ("vdd" y "vddo") y el get en bloque FALLA si falta uno: el nodo del T5
+        # solo declara vdd (0x84), vdd-v1 (0x83) y vcc_i2c (0x85). El "vddo" del
+        # Zinitix es su rail de I/O, que aqui es el vdd-v1 -> se apunta ahi.
+        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb \
+            /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
+            vddo-supply 0x83
         bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, sin OPP) + tactil zinitix bt541"
     done
     cat ${WORKDIR}/monaco-real-per.dtb ${WORKDIR}/monacop-per.dtb > ${WORKDIR}/dtb-blob-vendor.bin

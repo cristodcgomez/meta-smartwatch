@@ -139,3 +139,11 @@ CONFIG_STACKPROTECTOR_STRONG=y
 # ~8-15s (init vivo -> reboot). Off para el bring-up.
 # CONFIG_WQ_WATCHDOG is not set
 # CONFIG_QCOM_SOC_WATCHDOG is not set
+
+# ── TACTIL: el T5 lleva un ZINITIX (i2c-1 @0x20, nodo zinitix_ts@20) ──────────
+# El driver mainline (drivers/input/touchscreen/zinitix.c) existe en el arbol
+# pero NO estaba activado -> ningun driver se enlazaba al nodo y no existia
+# /dev/input/eventX de tactil (el compositor arrancaba con
+# evdevtouch:/dev/input/event2, que no existe). Su unica dependencia (I2C) se
+# cumple. Se pone =y para que probe en el arranque sin depender de modprobe.
+CONFIG_TOUCHSCREEN_ZINITIX=y
