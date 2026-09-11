@@ -1,4 +1,4 @@
-SUMMARY = "Recreate the dm-linear mapping for dace's /vendor partition and mount it"
+SUMMARY = "Recreate the dm-linear mappings for the T5's /super partitions and mount them"
 DESCRIPTION = "On stock Android-13/Halium-13, dace's vendor partition is a \
 logical partition packed inside /super (/dev/mmcblk0p80 on slot B). Android \
 first-stage init parses LP metadata and creates /dev/mapper/vendor_b via dm-linear; \
@@ -35,11 +35,9 @@ do_install() {
     ln -sf ../../../systemd/system/dace-vendor-mount.service \
         ${D}${sysconfdir}/systemd/system/local-fs.target.wants/dace-vendor-mount.service
 
-    install -d ${D}/vendor
 }
 
 SYSTEMD_SERVICE:${PN} = "dace-vendor-mount.service"
 FILES:${PN} = "${libexecdir}/dace-vendor-mount.sh \
                ${systemd_unitdir}/system/dace-vendor-mount.service \
-               ${sysconfdir}/systemd/system/local-fs.target.wants/dace-vendor-mount.service \
-               /vendor"
+               ${sysconfdir}/systemd/system/local-fs.target.wants/dace-vendor-mount.service"
