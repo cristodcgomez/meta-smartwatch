@@ -1,4 +1,11 @@
 androidboot.hardware=dace
 androidboot.memcg=1
-dace.debug=1
-dace.console=1
+# Lote de depuracion. El crash del rootfs nuevo llega a los ~9,5 s, JUSTO
+# despues de que systemd-modules-load cargue la cadena WLAN/icnss2 + ASoC + BT
+# de dace-post-rootfs.conf (que el rootfs viejo NUNCA cargaba: no esta en
+# modules.load.dace). El contenedor LXC todavia no habia arrancado.
+# Este lote arranca el rootfs con LAS DOS cosas enmascaradas para bisecar en
+# vivo por adb (y poder leer el journal del arranque que fallo). Para el modo
+# seguro (initramfs + adb + rootfs en /loop) cambiar esto por: dace.ramfs=1
+dace.noautoload=1
+dace.nolxc=1

@@ -242,18 +242,19 @@ fi
 # rootfs montado en /loop). Para boot normal: 'rm /sdcard/debug-ramfs'.
 DEBUG_RAMFS=0
 [ -e /sdcard/debug-ramfs ] && DEBUG_RAMFS=1
-# ── LOTE DE DEPURACION ──────────────────────────────────────────────
-# 'dace.debug=1' en el bootconfig del vendor_boot obliga a quedarse en el
-# initramfs: adb del ramfs + el rootfs montado en /loop (rw), que es lo que
-# permite leer el journal del arranque que fallo (journalctl -D
-# /loop/var/log/journal) y editar el rootfs (enmascarar servicios, etc.).
-# El rootfs manda: si existe /etc/dace-boot-normal se arranca normal aunque el
-# cmdline lo pida, asi que desde ese shell se alterna:
-#   touch /loop/etc/dace-boot-normal   -> siguiente arranque normal
-#   rm    /loop/etc/dace-boot-normal   -> vuelve el debug
-# (sin reflashear nada).
-grep -q "dace.debug=1" /proc/cmdline && DEBUG_RAMFS=1
-[ -e "$BOOT_DIR/etc/dace-boot-normal" ] && DEBUG_RAMFS=0
+# ── LOTE DE DEPURACION (todo por cmdline del bootconfig del vendor_boot) ──
+#   dace.ramfs=1      -> NO hace switch_root: adb del ramfs + rootfs montado en
+#                        /loop (rw). Modo SEGURO: se vuelve a el reflasheando
+#                        este mismo lote, sin depender de nada del rootfs. Sirve
+#                        para leer el journal del arranque que fallo
+#                        (adb pull /loop/var/log/journal) y editar el rootfs.
+#   dace.noautoload=1 -> arranca el rootfs pero VACIA modules-load.d/
+#                        dace-post-rootfs.conf (WLAN/icnss2 + ASoC + BT).
+#   dace.nolxc=1      -> arranca el rootfs con dace-lxc-android enmascarado.
+#   dace.console=1    -> arranca el rootfs con la UDC para la consola del kernel.
+# El flag es la UNICA fuente de verdad (a proposito): asi reflashear este lote
+# siempre devuelve el control y no hay forma de quedarse fuera del sistema.
+grep -q "dace.ramfs=1" /proc/cmdline && DEBUG_RAMFS=1
 [ "$DEBUG_RAMFS" = "1" ] && mark "debug-ramfs: sin switch_root (adb)"
 
 if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
@@ -344,6 +345,19 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
         setup_usb_console
         mark "console=1: UDC para la consola del kernel (sin adb del rootfs)"
     fi
+    # 'dace.noautoload=1': el arranque del rootfs nuevo carga en
+    # systemd-modules-load la cadena WLAN/icnss2 + ASoC + BT (dace-post-rootfs
+    # .conf), que en el rootfs viejo NO se cargaba nunca (no esta en
+    # modules.load.dace). Con esto se arranca sin ella para bisecar.
+    if grep -q "dace.noautoload=1" /proc/cmdline; then
+        : > "$BOOT_DIR/etc/modules-load.d/dace-post-rootfs.conf"
+        info "noautoload=1: dace-post-rootfs.conf vaciado"
+    fi
+    # 'dace.nolxc=1': arranca el rootfs con el contenedor Android enmascarado.
+    if grep -q "dace.nolxc=1" /proc/cmdline; then
+        ln -sf /dev/null "$BOOT_DIR/etc/systemd/system/dace-lxc-android.service"
+        info "nolxc=1: dace-lxc-android enmascarado"
+    fi
     mark "rootfs ok, switch_root"
     [ -e /init.machine ] && /init.machine $BOOT_DIR > /dev/kmsg 2>&1 || true
     setup_devtmpfs $BOOT_DIR
@@ -365,6 +379,12 @@ mkdir -p /sys/kernel/config
 mount -t configfs none /sys/kernel/config 2>/dev/null
 
 ZU=.sbu
+# La consola ACM (setup_usb_console, arriba) ya tiene la UDC enganchada y la
+# UDC es UNA: hay que soltarla antes de enganchar el gadget de adb, si no el
+# `echo $UDC > .../adb/UDC` falla y el ramfs se queda SIN adb (justo lo que
+# hace falta para leer el journal del rootfs).
+: > /sys/kernel/config/usb_gadget/console/UDC 2>/dev/null
+sleep 1
 /usr/bin/android-gadget-setup adb 2>/dev/null && mark "gadget-setup ok" || mark "gadget-setup fail"
 # legacy android_usb (no-op en GKI pero por compat)
 echo 18d1 > /sys/class/android_usb/android0/idVendor 2>/dev/null
