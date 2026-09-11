@@ -185,7 +185,19 @@ do_compile() {
         # falla (-22 'opp key field not found') y el probe aborta. Sin OPP el
         # sdhci corre con los clocks fijos del ABL (devfreq opcional).
         "$FDTPUT" -d ${WORKDIR}/${dtb}-per.dtb /soc/sdhci@4744000 operating-points-v2
-        bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, sin OPP)"
+        # TACTIL: el nodo del T5 se llama "zinitix_ts@20" con
+        # compatible = "zinitix,zinitix-ts", pero el driver del kernel
+        # (drivers/input/touchscreen/zinitix.c) solo acepta "zinitix,bt541"
+        # -> el driver no se enlazaba y NO existia /dev/input/eventX de tactil
+        # (el compositor arrancaba con evdevtouch:/dev/input/event2, que no
+        # existe; el unico input eran gpio-keys y qpnp_pon).
+        # El nodo declara zinitix,pname="SM-G5308W" con x/y_resolution=0x1d1
+        # (465, la del panel), o sea que es un BT541 rebautizado: se anade el
+        # compatible que espera el driver DEJANDO tambien el original.
+        "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb \
+            /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
+            compatible "zinitix,zinitix-ts" "zinitix,bt541"
+        bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, sin OPP) + tactil zinitix bt541"
     done
     cat ${WORKDIR}/monaco-real-per.dtb ${WORKDIR}/monacop-per.dtb > ${WORKDIR}/dtb-blob-vendor.bin
     bbnote "DTB blob vendor_boot: $(stat -c%s ${WORKDIR}/dtb-blob-vendor.bin) bytes (stock=572016)"
