@@ -49,6 +49,20 @@ mkdir -m 0755 /sys;   mount -t sysfs sys /sys
 mkdir -p /dev;        setup_devtmpfs ""
 mark "mounts"
 
+# ── arm_smmu: NO deshabilitar el bypass (dace bring-up) ──
+# CONFIG_ARM_SMMU_DISABLE_BYPASS_BY_DEFAULT=y en GKI hace que
+# arm_smmu_device_reset() ponga sCR0.USFCFG: los streams NO emparejados en la
+# tabla SMR FALLAN en vez de hacer bypass. El firmware/TZ dejo el apps-smmu con
+# solo el SMR de handoff (qcom,handoff-smrs = <0x420 0x02>), asi que con USFCFG
+# el eMMC (y otros masters ya programados por el bootloader) empiezan a fallar
+# la traduccion -> 'mmc0: ADMA error: 0x02000000' y, segun el master, reset
+# duro a EDL. El kernel stock Mobvoi usa el default (bypass); lo replicamos con
+# el module param (arm_smmu es =m, asi que modprobe.d lo aplica).
+mkdir -p /etc/modprobe.d
+printf '%s\n' 'options arm_smmu disable_bypass=0' \
+    > /etc/modprobe.d/dace-smmu.conf
+info "modprobe.d/arm_smmu disable_bypass=0"
+
 # ── modprobe vendor ──
 KREL=$(uname -r)
 [ ! -e "/lib/modules/$KREL" ] && ln -sf . "/lib/modules/$KREL"
@@ -230,8 +244,8 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
     # persiste: el PRIMER arranque con este lote hace la prueba y los
     # siguientes arrancan normal -> si el SoC se resetea a EDL no hay boot-loop
     # (basta un apagado/encendido).
-    if [ ! -e "$BOOT_DIR/etc/dace-qnoc-test-v3-done" ]; then
-        : > "$BOOT_DIR/etc/dace-qnoc-test-v3-done"
+    if [ ! -e "$BOOT_DIR/etc/dace-qnoc-test-v4-done" ]; then
+        : > "$BOOT_DIR/etc/dace-qnoc-test-v4-done"
         sync
         setup_usb_console
         sleep 3
