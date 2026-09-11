@@ -242,19 +242,36 @@ fi
 # rootfs montado en /loop). Para boot normal: 'rm /sdcard/debug-ramfs'.
 DEBUG_RAMFS=0
 [ -e /sdcard/debug-ramfs ] && DEBUG_RAMFS=1
-# ── LOTE DE DEPURACION (todo por cmdline del bootconfig del vendor_boot) ──
-#   dace.ramfs=1      -> NO hace switch_root: adb del ramfs + rootfs montado en
-#                        /loop (rw). Modo SEGURO: se vuelve a el reflasheando
-#                        este mismo lote, sin depender de nada del rootfs. Sirve
-#                        para leer el journal del arranque que fallo
-#                        (adb pull /loop/var/log/journal) y editar el rootfs.
-#   dace.noautoload=1 -> arranca el rootfs pero VACIA modules-load.d/
-#                        dace-post-rootfs.conf (WLAN/icnss2 + ASoC + BT).
-#   dace.nolxc=1      -> arranca el rootfs con dace-lxc-android enmascarado.
-#   dace.console=1    -> arranca el rootfs con la UDC para la consola del kernel.
-# El flag es la UNICA fuente de verdad (a proposito): asi reflashear este lote
-# siempre devuelve el control y no hay forma de quedarse fuera del sistema.
+# ── MODO DE DEPURACION ────────────────────────────────────────────
+# El bootconfig del vendor_boot NO llega a /proc/cmdline (comprobado: ni
+# androidboot.memcg=1 ni los flags dace.* aparecen), asi que el unico canal
+# fiable es el --vendor_cmdline (de ahi si salen lpm_levels.sleep_disabled,
+# fw_devlink=permissive, etc.). Con 'dace.debug=1' en el cmdline el initramfs
+# decide el modo leyendo /sdcard/dace-mode (la raiz de la userdata, que el
+# initramfs SI puede escribir) y BORRANDOLO acto seguido: asi, si el rootfs
+# arranca y cae a EDL, el siguiente arranque ya no encuentra el fichero y
+# vuelve solo al modo seguro con adb (imposible quedarse en bucle).
+#
+#   sin fichero        -> ramfs + adb + rootfs en /loop   (SEGURO)
+#   boot               -> arranca el rootfs
+#   boot noautoload    -> + vacia modules-load.d/dace-post-rootfs.conf
+#   boot nolxc         -> + enmascara dace-lxc-android
+#   boot console       -> + UDC para la consola del kernel (sin adb)
+#   boot noautoload nolxc console   (combinable)
+#
+#   adb shell 'echo "boot noautoload nolxc" > /sdcard/dace-mode; reboot'
+DEBUG_MODE=""
+if grep -q "dace.debug=1" /proc/cmdline; then
+    DEBUG_MODE=$(cat /sdcard/dace-mode 2>/dev/null | tr '\n' ' ')
+    rm -f /sdcard/dace-mode; sync
+    mark "dace-modo: '${DEBUG_MODE:-ramfs}' (fichero consumido)"
+    [ -n "$DEBUG_MODE" ] || DEBUG_MODE="ramfs"
+    DEBUG_RAMFS=1
+    case " $DEBUG_MODE " in *" boot "*) DEBUG_RAMFS=0 ;; esac
+fi
+# Compatibilidad: flags sueltos en el cmdline.
 grep -q "dace.ramfs=1" /proc/cmdline && DEBUG_RAMFS=1
+[ -e /sdcard/debug-ramfs ] && DEBUG_RAMFS=1
 [ "$DEBUG_RAMFS" = "1" ] && mark "debug-ramfs: sin switch_root (adb)"
 
 if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
@@ -333,30 +350,35 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
         setup_usb_console
         mark "console-debug: consola (sin adb)"
     fi
-    # 'dace.console=1' (lote de depuracion): deja la UDC para la consola del
-    # kernel enmascarando usb-moded/adbd/init_gfs. Sin esto usb-moded se lleva
-    # la UDC a los ~28 s y la consola muere JUSTO antes de lo interesante (el
-    # contenedor LXC), que es donde se pierde el rastro del crash. La UDC es
-    # una: o consola en vivo, o adb del rootfs.
-    if grep -q "dace.console=1" /proc/cmdline; then
+    # Flags activos (POSIX: shell del initramfs es busybox ash, nada de [[ ]])
+    DO_CONSOLE=0; DO_NOAUTOLOAD=0; DO_NOLXC=0
+    case " $DEBUG_MODE " in *" console "*)    DO_CONSOLE=1 ;; esac
+    case " $DEBUG_MODE " in *" noautoload "*) DO_NOAUTOLOAD=1 ;; esac
+    case " $DEBUG_MODE " in *" nolxc "*)      DO_NOLXC=1 ;; esac
+    grep -q "dace.console=1" /proc/cmdline    && DO_CONSOLE=1
+    grep -q "dace.noautoload=1" /proc/cmdline && DO_NOAUTOLOAD=1
+    grep -q "dace.nolxc=1" /proc/cmdline      && DO_NOLXC=1
+    # 'console': deja la UDC para la consola del kernel enmascarando
+    # usb-moded/adbd/init_gfs. Sin esto usb-moded se lleva la UDC a los ~10 s
+    # y la consola muere justo donde interesa. La UDC es una: o consola, o adb.
+    if [ "$DO_CONSOLE" = "1" ]; then
         for u in init_gfs.service usb-moded.service android-tools-adbd.service adbd-prepare.service; do
             ln -sf /dev/null "$BOOT_DIR/etc/systemd/system/$u"
         done
         setup_usb_console
-        mark "console=1: UDC para la consola del kernel (sin adb del rootfs)"
+        mark "console: UDC para la consola del kernel (sin adb del rootfs)"
     fi
-    # 'dace.noautoload=1': el arranque del rootfs nuevo carga en
-    # systemd-modules-load la cadena WLAN/icnss2 + ASoC + BT (dace-post-rootfs
-    # .conf), que en el rootfs viejo NO se cargaba nunca (no esta en
-    # modules.load.dace). Con esto se arranca sin ella para bisecar.
-    if grep -q "dace.noautoload=1" /proc/cmdline; then
+    # 'noautoload': el rootfs nuevo carga en systemd-modules-load la cadena
+    # WLAN/icnss2 + ASoC + BT (dace-post-rootfs.conf), que en el rootfs viejo
+    # NO se cargaba nunca (no esta en modules.load.dace).
+    if [ "$DO_NOAUTOLOAD" = "1" ]; then
         : > "$BOOT_DIR/etc/modules-load.d/dace-post-rootfs.conf"
-        info "noautoload=1: dace-post-rootfs.conf vaciado"
+        mark "noautoload: dace-post-rootfs.conf vaciado"
     fi
-    # 'dace.nolxc=1': arranca el rootfs con el contenedor Android enmascarado.
-    if grep -q "dace.nolxc=1" /proc/cmdline; then
+    # 'nolxc': arranca el rootfs con el contenedor Android enmascarado.
+    if [ "$DO_NOLXC" = "1" ]; then
         ln -sf /dev/null "$BOOT_DIR/etc/systemd/system/dace-lxc-android.service"
-        info "nolxc=1: dace-lxc-android enmascarado"
+        mark "nolxc: dace-lxc-android enmascarado"
     fi
     mark "rootfs ok, switch_root"
     [ -e /init.machine ] && /init.machine $BOOT_DIR > /dev/kmsg 2>&1 || true
