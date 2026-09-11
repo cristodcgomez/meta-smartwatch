@@ -206,6 +206,13 @@ do_compile() {
     # (debug-ramdisk quitado: el init.sh dace lo soporta, pero el lote normal
     #  debe hacer switch_root; para depurar usar /sdcard/debug-ramfs o el lote dbg)
     # a switch_root, que falla sin rootfs en el T5 -> EDL tras ~15s).
+    #
+    # OJO: 'dace.debug=1' al final del --vendor_cmdline es FASE DE BRING-UP.
+    # Activa el modo de depuracion del init.sh (/sdcard/dace-mode, AGENTS §12):
+    # SIN ese fichero el arranque por defecto es el RAMFS con adb (modo SEGURO)
+    # y NO el rootfs. Para un arranque "de produccion" (que el reloj levante el
+    # rootfs solo) hay que QUITARLO de aqui. Tiene que ir en el vendor_cmdline:
+    # se probo en el bootconfig del vendor_boot y NO llega a /proc/cmdline.
     # blob de 2 DTBs. Sin el monacop el ABL cae a EDL.
     "${MKBOOTIMG}" \
         --header_version 4 --pagesize ${MKBOOTIMG_PAGESIZE} \
