@@ -27,10 +27,10 @@ paso alcanzado del probe (el T5 no tiene UART).
 Upstream-Status: Inappropriate [dace bring-up]
 ---
 diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu.c b/drivers/iommu/arm/arm-smmu/arm-smmu.c
-index b5067375dd33..a18a78eca385 100644
+index b5067375dd33..358cd589a294 100644
 --- a/drivers/iommu/arm/arm-smmu/arm-smmu.c
 +++ b/drivers/iommu/arm/arm-smmu/arm-smmu.c
-@@ -84,6 +84,35 @@ MODULE_PARM_DESC(disable_bypass,
+@@ -84,6 +84,39 @@ MODULE_PARM_DESC(disable_bypass,
  
  static bool using_legacy_binding, using_generic_binding;
  
@@ -51,10 +51,14 @@ index b5067375dd33..a18a78eca385 100644
 +#define DACE_SMMU_FB_PHYS	0x5c000000ULL
 +#define DACE_SMMU_FB_NPIX	(640 * 400)
 +
-+static void dace_smmu_mark(u32 argb)
++static void dace_smmu_mark(struct device *dev, u32 argb, const char *t)
 +{
 +	u32 *fb = (u32 *)phys_to_virt((phys_addr_t)DACE_SMMU_FB_PHYS);
 +	size_t i;
++
++	/* La consola (ttyGS0 por el gadget ACM) es el canal fiable: en el reset a
++	 * EDL el panel se apaga y la pantalla no sirve para telemetria. */
++	dev_err(dev, "DACE-SMMU %s: %s\n", dev_name(dev), t);
 +
 +	if (!fb)
 +		return;
@@ -66,7 +70,7 @@ index b5067375dd33..a18a78eca385 100644
  struct arm_smmu_option_prop {
  	u32 opt;
  	const char *prop;
-@@ -91,6 +120,7 @@ struct arm_smmu_option_prop {
+@@ -91,6 +124,7 @@ struct arm_smmu_option_prop {
  
  static struct arm_smmu_option_prop arm_smmu_options[] = {
  	{ ARM_SMMU_OPT_FATAL_ASF, "qcom,fatal-asf" },
@@ -74,9 +78,11 @@ index b5067375dd33..a18a78eca385 100644
  	{ ARM_SMMU_OPT_3LVL_TABLES, "qcom,use-3-lvl-tables" },
  	{ ARM_SMMU_OPT_NO_ASID_RETENTION, "qcom,no-asid-retention" },
  	{ ARM_SMMU_OPT_DISABLE_ATOS, "qcom,disable-atos" },
-@@ -2831,6 +2861,18 @@ static void arm_smmu_device_reset(struct arm_smmu_device *smmu)
+@@ -2830,7 +2864,21 @@ static void arm_smmu_device_reset(struct arm_smmu_device *smmu)
+ 	/* clear global FSR */
  	reg = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_sGFSR);
  	arm_smmu_gr0_write(smmu, ARM_SMMU_GR0_sGFSR, reg);
++	dace_smmu_mark(smmu->dev, 0x00ffa500, "S7b reset: sGFSR OK");
  
 +	/*
 +	 * dace: honrar "qcom,skip-init". El firmware seguro (TZ) ya ha
@@ -90,60 +96,85 @@ index b5067375dd33..a18a78eca385 100644
 +	 * como lo dejo el bootloader (que es lo que pide el DT).
 +	 */
 +	if (!(smmu->options & ARM_SMMU_OPT_SKIP_INIT)) {
++		dace_smmu_mark(smmu->dev, 0x00ff00ff, "S7c reset: SMR/CB WRITES");
  #if defined CONFIG_QTI_QUIN_GVM
  	/*
  	 * Reset stream mapping groups for unused sme's: Initial values mark all SMRn as
-@@ -2860,6 +2902,7 @@ static void arm_smmu_device_reset(struct arm_smmu_device *smmu)
+@@ -2860,7 +2908,11 @@ static void arm_smmu_device_reset(struct arm_smmu_device *smmu)
  		arm_smmu_cb_write(smmu, i, ARM_SMMU_CB_FSR, ARM_SMMU_FSR_FAULT);
  	}
  #endif
++	} else {
++		dace_smmu_mark(smmu->dev, 0x00ff00ff, "S7c reset: SMR/CB SKIP");
 +	}
  
++	dace_smmu_mark(smmu->dev, 0x008000ff, "S7d reset: TLBI OK");
  	/* Invalidate the TLB, just in case */
  	arm_smmu_gr0_write(smmu, ARM_SMMU_GR0_TLBIALLH, QCOM_DUMMY_VAL);
-@@ -3560,9 +3603,13 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
+ 	arm_smmu_gr0_write(smmu, ARM_SMMU_GR0_TLBIALLNSNH, QCOM_DUMMY_VAL);
+@@ -3560,9 +3612,13 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
  	if (err)
  		return err;
  
-+	dace_smmu_mark(0x00101010);	/* dace: cfg_probe start */
++	dace_smmu_mark(dev, 0x00101010, "S1 cfg_probe START");
  	err = arm_smmu_device_cfg_probe(smmu);
 -	if (err)
 +	if (err) {
-+		dace_smmu_mark(0x00ff0000);	/* dace: cfg_probe FAIL */
++		dace_smmu_mark(dev, 0x00ff0000, "S1 cfg_probe FALLO");
  		goto out_power_off;
 +	}
-+	dace_smmu_mark(0x000000ff);	/* dace: cfg_probe done */
++	dace_smmu_mark(dev, 0x000000ff, "S2 cfg_probe OK");
  
  	err = arm_smmu_parse_impl_def_registers(smmu);
  	if (err)
-@@ -3606,9 +3653,13 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
+@@ -3606,10 +3662,15 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
  		goto out_power_off;
  	smmu->phys_addr = res->start;
  	parse_driver_options(smmu);
-+	dace_smmu_mark(0x0000ff00);	/* dace: handoff_cbs start */
++	dace_smmu_mark(dev, 0x0000ff00, "S3 handoff_cbs START");
  	err = arm_smmu_handoff_cbs(smmu);
 -	if (err)
 +	if (err) {
-+		dace_smmu_mark(0x00ff0000);	/* dace: handoff_cbs FAIL */
++		dace_smmu_mark(dev, 0x00ff0000, "S3 handoff_cbs FALLO");
  		goto out_power_off;
 +	}
-+	dace_smmu_mark(0x0000ffff);	/* dace: handoff_cbs done */
++	dace_smmu_mark(dev, 0x0000ffff, "S4 handoff_cbs OK");
  
++	dace_smmu_mark(dev, 0x00808000, "S5 sysfs_add START");
  	err = iommu_device_sysfs_add(&smmu->iommu, smmu->dev, NULL,
  				     "smmu.%pa", &ioaddr);
-@@ -3624,9 +3675,12 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
+ 	if (err) {
+@@ -3623,10 +3684,15 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
+ 		goto err_sysfs_remove;
  	}
  
++	dace_smmu_mark(dev, 0x00808080, "S6 iommu_registered OK");
  	platform_set_drvdata(pdev, smmu);
-+	dace_smmu_mark(0x00ffff00);	/* dace: reset start */
++	dace_smmu_mark(dev, 0x00ffff00, "S7 reset START");
  	arm_smmu_device_reset(smmu);
-+	dace_smmu_mark(0x00ff00ff);	/* dace: reset done */
++	dace_smmu_mark(dev, 0x00ffffff, "S9 reset DONE");
++	dace_smmu_mark(dev, 0x0000ff80, "S9a test_smr_masks START");
  	arm_smmu_test_smr_masks(smmu);
  	arm_smmu_interrupt_selftest(smmu);
-+	dace_smmu_mark(0x00ffffff);	/* dace: probe end */
++	dace_smmu_mark(dev, 0x0010ff10, "S9b test_smr_masks DONE");
  
  	/*
  	 * We want to avoid touching dev->power.lock in fastpaths unless
+@@ -3649,11 +3715,14 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
+ 	 * ready to handle default domain setup as soon as any SMMU exists.
+ 	 */
+ 	if (!using_legacy_binding) {
++		dace_smmu_mark(dev, 0x00ff00ff, "S10 bus_init START");
+ 		err = arm_smmu_bus_init(&arm_smmu_ops.iommu_ops);
+ 		if (err)
+ 			goto err_unregister_device;
++		dace_smmu_mark(dev, 0x0010ff10, "S11 bus_init OK");
+ 	}
+ 
++	dace_smmu_mark(dev, 0x0000ffff, "S12 probe END OK");
+ 	return 0;
+ 
+ err_unregister_device:
 diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu.h b/drivers/iommu/arm/arm-smmu/arm-smmu.h
 index 5bb6e5bd2c06..1427a91570f9 100644
 --- a/drivers/iommu/arm/arm-smmu/arm-smmu.h
