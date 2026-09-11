@@ -104,34 +104,22 @@ KREL=$(uname -r)
 mark "krel ${KREL}"
 modprobe google-extcon-usb-shim usb_force_disable_boot=0 2>/dev/kmsg
 MI=0
-CONSOLE_UP=0
 while read mod; do
     case "$mod" in ''|\#*) continue ;; esac
-    MI=$((MI+1))
     name="${mod%.ko}"
+    # qnoc-monaco / msm_drm / msm_kgsl se cargan MAS ABAJO, despues de montar
+    # la consola USB: msm_smmu_probe() (driver de smmu_sde_unsec_cb, dentro de
+    # msm_drm.ko) exige que el apps-smmu ya este para obtener dominio IOMMU, y
+    # queremos la consola capturando el arranque del display.
+    case "$name" in
+        qnoc-monaco|msm_drm|msm_kgsl)
+            info "M-- ${name} (diferido al arranque del display)"
+            continue ;;
+    esac
+    MI=$((MI+1))
     ptext "CAN M${MI} ${name}"
     info "M${MI} ${name}"
     modprobe "$name" 2>/dev/kmsg
-    # ── Consola USB EARLY (diagnostico del display) ──
-    # dwc3-msm (linea 61 de modules.load.dace) ya crea la UDC y qnoc va en la
-    # 103 y msm_drm en la 112, asi que montamos la consola ACM JUSTO despues de
-    # dwc3-msm: si el arranque de la pantalla (msm_drm + apps-smmu) revienta, la
-    # consola ya esta arriba y lo captura. Montarla al final (como antes) no
-    # sirve: el crash ocurre antes y no hay ni log ni pantalla.
-    if [ "$CONSOLE_UP" = "0" ] && [ "$name" = "dwc3-msm" ]; then
-        CONSOLE_UP=1
-        for fd in /sys/devices/platform/soc/soc:extcon_usb_shim/force_disable \
-                  /sys/bus/platform/devices/soc:extcon_usb_shim/force_disable; do
-            [ -e "$fd" ] && echo 0 > "$fd" 2>/dev/kmsg
-        done
-        for i in 1 2 3 4 5 6 7 8 9 10; do
-            [ -n "$(ls /sys/class/udc 2>/dev/null)" ] && break
-            sleep 1
-        done
-        setup_usb_console
-        info "consola EARLY arriba (UDC=$(ls /sys/class/udc 2>/dev/null))"
-        sleep 2
-    fi
 done < /etc/modules.load.dace
 mark "modprobe done ${MI}"
 
@@ -142,6 +130,23 @@ for fd in /sys/devices/platform/soc/soc:extcon_usb_shim/force_disable \
 done
 mount -t debugfs none /sys/kernel/debug 2>/dev/null || true
 mark "usb gate + debugfs"
+
+# ════════════════════════════════════════════════════════════════════
+# Consola USB + ARRANQUE DEL DISPLAY (diagnostico)
+# La consola se monta AQUI (no antes): dwc3-msm carga en la linea 61 pero la
+# UDC no existe hasta despues (cadena extcon/phy completa). Con la consola ya
+# arriba cargamos qnoc-monaco -> msm_drm -> msm_kgsl en orden: el apps-smmu
+# debe existir ANTES que msm_drm o smmu_sde_unsec_cb nunca obtiene dominio
+# IOMMU (-EINVAL, no EPROBE_DEFER) y msm_drm_bind() no crea /dev/dri.
+# ════════════════════════════════════════════════════════════════════
+setup_usb_console
+sleep 2
+info "DISPLAY: consola arriba, cargando qnoc-monaco"
+modprobe qnoc-monaco 2>/dev/kmsg ; info "DISPLAY: qnoc-monaco rc=$?"
+modprobe msm_drm 2>/dev/kmsg     ; info "DISPLAY: msm_drm rc=$?"
+modprobe msm_kgsl 2>/dev/kmsg    ; info "DISPLAY: msm_kgsl rc=$?"
+info "DISPLAY: fin de la carga (si sigues viendo esto, no hubo reset)"
+sleep 2
 
 # ── pequeña ventana de estado (2s) ──
 i=0
