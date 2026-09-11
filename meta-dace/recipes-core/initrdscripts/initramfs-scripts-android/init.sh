@@ -242,6 +242,18 @@ fi
 # rootfs montado en /loop). Para boot normal: 'rm /sdcard/debug-ramfs'.
 DEBUG_RAMFS=0
 [ -e /sdcard/debug-ramfs ] && DEBUG_RAMFS=1
+# ── LOTE DE DEPURACION ──────────────────────────────────────────────
+# 'dace.debug=1' en el bootconfig del vendor_boot obliga a quedarse en el
+# initramfs: adb del ramfs + el rootfs montado en /loop (rw), que es lo que
+# permite leer el journal del arranque que fallo (journalctl -D
+# /loop/var/log/journal) y editar el rootfs (enmascarar servicios, etc.).
+# El rootfs manda: si existe /etc/dace-boot-normal se arranca normal aunque el
+# cmdline lo pida, asi que desde ese shell se alterna:
+#   touch /loop/etc/dace-boot-normal   -> siguiente arranque normal
+#   rm    /loop/etc/dace-boot-normal   -> vuelve el debug
+# (sin reflashear nada).
+grep -q "dace.debug=1" /proc/cmdline && DEBUG_RAMFS=1
+[ -e "$BOOT_DIR/etc/dace-boot-normal" ] && DEBUG_RAMFS=0
 [ "$DEBUG_RAMFS" = "1" ] && mark "debug-ramfs: sin switch_root (adb)"
 
 if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
@@ -319,6 +331,18 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
     if [ -e /sdcard/console-debug ]; then
         setup_usb_console
         mark "console-debug: consola (sin adb)"
+    fi
+    # 'dace.console=1' (lote de depuracion): deja la UDC para la consola del
+    # kernel enmascarando usb-moded/adbd/init_gfs. Sin esto usb-moded se lleva
+    # la UDC a los ~28 s y la consola muere JUSTO antes de lo interesante (el
+    # contenedor LXC), que es donde se pierde el rastro del crash. La UDC es
+    # una: o consola en vivo, o adb del rootfs.
+    if grep -q "dace.console=1" /proc/cmdline; then
+        for u in init_gfs.service usb-moded.service android-tools-adbd.service adbd-prepare.service; do
+            ln -sf /dev/null "$BOOT_DIR/etc/systemd/system/$u"
+        done
+        setup_usb_console
+        mark "console=1: UDC para la consola del kernel (sin adb del rootfs)"
     fi
     mark "rootfs ok, switch_root"
     [ -e /init.machine ] && /init.machine $BOOT_DIR > /dev/kmsg 2>&1 || true

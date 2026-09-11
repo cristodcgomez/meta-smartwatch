@@ -1,2 +1,4 @@
 androidboot.hardware=dace
 androidboot.memcg=1
+dace.debug=1
+dace.console=1
