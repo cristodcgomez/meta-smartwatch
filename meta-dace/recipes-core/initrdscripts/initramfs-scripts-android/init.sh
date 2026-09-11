@@ -63,17 +63,75 @@ printf '%s\n' 'options arm_smmu disable_bypass=0' \
     > /etc/modprobe.d/dace-smmu.conf
 info "modprobe.d/arm_smmu disable_bypass=0"
 
+# ── consola USB (ACM) ── (definida ANTES del bucle de modulos:
+# el bucle la usa en cuanto carga dwc3-msm, para capturar el
+# arranque del display)
+setup_usb_console() {
+    G=/sys/kernel/config/usb_gadget
+    # Idempotente: si la consola ya esta enganchada, no la recreamos (cada
+    # recreacion re-enumera el USB y perderiamos lineas de consola).
+    if [ -n "$(cat $G/console/UDC 2>/dev/null)" ]; then
+        return 0
+    fi
+    mkdir -p /sys/kernel/config
+    mount -t configfs none /sys/kernel/config 2>/dev/null
+    for u in $G/*/UDC; do
+        [ -e "$u" ] || continue
+        [ -n "$(cat $u 2>/dev/null)" ] && echo "" > "$u" 2>/dev/null
+    done
+    mkdir -p $G/console
+    cd $G/console 2>/dev/null || return
+    echo 0x18d1 > idVendor
+    echo 0x4ee7 > idProduct
+    mkdir -p strings/0x409
+    echo "dace-console" > strings/0x409/serialnumber
+    echo "AsteroidOS"   > strings/0x409/manufacturer
+    echo "dace-console" > strings/0x409/product
+    mkdir -p configs/c.1/strings/0x409
+    echo "acm" > configs/c.1/strings/0x409/configuration
+    mkdir -p functions/acm.usb0
+    ln -sf functions/acm.usb0 configs/c.1/acm.usb0
+    UDC=$(ls /sys/class/udc 2>/dev/null | sed -n 1p)
+    [ -n "$UDC" ] && echo "$UDC" > UDC
+    cd /
+    ptext "console: UDC=${UDC:-none}"
+    info "console: UDC=${UDC:-none}"
+}
+
 # ── modprobe vendor ──
 KREL=$(uname -r)
 [ ! -e "/lib/modules/$KREL" ] && ln -sf . "/lib/modules/$KREL"
 mark "krel ${KREL}"
 modprobe google-extcon-usb-shim usb_force_disable_boot=0 2>/dev/kmsg
 MI=0
+CONSOLE_UP=0
 while read mod; do
     case "$mod" in ''|\#*) continue ;; esac
     MI=$((MI+1))
-    ptext "CAN M${MI} ${mod%.ko}"
-    modprobe "${mod%.ko}" 2>/dev/kmsg
+    name="${mod%.ko}"
+    ptext "CAN M${MI} ${name}"
+    info "M${MI} ${name}"
+    modprobe "$name" 2>/dev/kmsg
+    # ── Consola USB EARLY (diagnostico del display) ──
+    # dwc3-msm (linea 61 de modules.load.dace) ya crea la UDC y qnoc va en la
+    # 103 y msm_drm en la 112, asi que montamos la consola ACM JUSTO despues de
+    # dwc3-msm: si el arranque de la pantalla (msm_drm + apps-smmu) revienta, la
+    # consola ya esta arriba y lo captura. Montarla al final (como antes) no
+    # sirve: el crash ocurre antes y no hay ni log ni pantalla.
+    if [ "$CONSOLE_UP" = "0" ] && [ "$name" = "dwc3-msm" ]; then
+        CONSOLE_UP=1
+        for fd in /sys/devices/platform/soc/soc:extcon_usb_shim/force_disable \
+                  /sys/bus/platform/devices/soc:extcon_usb_shim/force_disable; do
+            [ -e "$fd" ] && echo 0 > "$fd" 2>/dev/kmsg
+        done
+        for i in 1 2 3 4 5 6 7 8 9 10; do
+            [ -n "$(ls /sys/class/udc 2>/dev/null)" ] && break
+            sleep 1
+        done
+        setup_usb_console
+        info "consola EARLY arriba (UDC=$(ls /sys/class/udc 2>/dev/null))"
+        sleep 2
+    fi
 done < /etc/modules.load.dace
 mark "modprobe done ${MI}"
 
@@ -156,32 +214,6 @@ fi
 # host ve /dev/ttyACM0 con el log del kernel. Sirve para ver el boot del rootfs
 # (el journal no da tiempo a sincronizar si hay reset duro a EDL).
 # ════════════════════════════════════════════════════════════════════
-setup_usb_console() {
-    G=/sys/kernel/config/usb_gadget
-    mkdir -p /sys/kernel/config
-    mount -t configfs none /sys/kernel/config 2>/dev/null
-    for u in $G/*/UDC; do
-        [ -e "$u" ] || continue
-        [ -n "$(cat $u 2>/dev/null)" ] && echo "" > "$u" 2>/dev/null
-    done
-    mkdir -p $G/console
-    cd $G/console 2>/dev/null || return
-    echo 0x18d1 > idVendor
-    echo 0x4ee7 > idProduct
-    mkdir -p strings/0x409
-    echo "dace-console" > strings/0x409/serialnumber
-    echo "AsteroidOS"   > strings/0x409/manufacturer
-    echo "dace-console" > strings/0x409/product
-    mkdir -p configs/c.1/strings/0x409
-    echo "acm" > configs/c.1/strings/0x409/configuration
-    mkdir -p functions/acm.usb0
-    ln -sf functions/acm.usb0 configs/c.1/acm.usb0
-    UDC=$(ls /sys/class/udc 2>/dev/null | sed -n 1p)
-    [ -n "$UDC" ] && echo "$UDC" > UDC
-    cd /
-    ptext "console: UDC=${UDC:-none}"
-    info "console: UDC=${UDC:-none}"
-}
 
 # ════════════════════════════════════════════════════════════════════
 # ¿Hay systemd real? → switch_root (señal de boot completo, watchdog off)
