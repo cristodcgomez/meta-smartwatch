@@ -230,17 +230,38 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
     # persiste: el PRIMER arranque con este lote hace la prueba y los
     # siguientes arrancan normal -> si el SoC se resetea a EDL no hay boot-loop
     # (basta un apagado/encendido).
-    if [ ! -e "$BOOT_DIR/etc/dace-qnoc-test-done" ]; then
-        : > "$BOOT_DIR/etc/dace-qnoc-test-done"
+    if [ ! -e "$BOOT_DIR/etc/dace-qnoc-test-v2-done" ]; then
+        : > "$BOOT_DIR/etc/dace-qnoc-test-v2-done"
         sync
         setup_usb_console
         sleep 3
         mark "TEST: consola arriba, modprobe qnoc-monaco"
         modprobe qnoc-monaco 2>/dev/kmsg
         info "TEST: modprobe qnoc-monaco rc=$?"
-        mark "TEST: modprobe hecho (espero 20s)"
-        sleep 20
-        mark "TEST: SIGUE VIVO (NO hubo reset)"
+        mark "TEST: modprobe hecho (espero 30s)"
+        sleep 30
+        # Volcado de diagnostico ANTES de switch_root (que es donde el eMMC da
+        # ADMA error y el SoC resetea): queremos saber si msm_drm probe y si
+        # hay /dev/dri, para no confundir "display no probo" con "crash luego".
+        mark "TEST: volcando diagnostico a la consola"
+        {
+            echo "===== DACE TEST DUMP INICIO ====="
+            echo "-- qnoc/icc cargados:"
+            grep -E "qnoc_monaco|qnoc_qos_rpm|icc_rpm" /proc/modules | cut -d' ' -f1,2
+            echo "-- qnoc provider en /sys/class/interconnect:"
+            ls /sys/class/interconnect 2>&1 | head -5
+            echo "-- /dev/dri:"; ls -la /dev/dri 2>&1
+            echo "-- /dev/fb*:"; ls -la /dev/fb* 2>&1
+            echo "-- /sys/class/drm:"; ls /sys/class/drm 2>&1
+            echo "-- drm status:"
+            cat /sys/class/drm/*/status 2>/dev/null | tr '\n' ' '; echo
+            echo "-- diferidos:"
+            cat /sys/kernel/debug/devices_deferred 2>&1 | head -25
+            echo "-- dmesg (drm/sde/kgsl/smmu):"
+            dmesg | grep -iE "msm_drm|msm |sde|drm|kgsl|apps-smmu|SMMUv2|iommu" | tail -30
+            echo "===== DACE TEST DUMP FIN ====="
+        } > /dev/kmsg 2>&1
+        mark "TEST: fin dump, switch_root"
     fi
     if [ -e /sdcard/console-debug ]; then
         setup_usb_console
