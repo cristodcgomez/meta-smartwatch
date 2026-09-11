@@ -27,7 +27,7 @@ paso alcanzado del probe (el T5 no tiene UART).
 Upstream-Status: Inappropriate [dace bring-up]
 ---
 diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu.c b/drivers/iommu/arm/arm-smmu/arm-smmu.c
-index b5067375dd33..8859960ee891 100644
+index b5067375dd33..13789c9282b4 100644
 --- a/drivers/iommu/arm/arm-smmu/arm-smmu.c
 +++ b/drivers/iommu/arm/arm-smmu/arm-smmu.c
 @@ -84,6 +84,39 @@ MODULE_PARM_DESC(disable_bypass,
@@ -112,7 +112,7 @@ index b5067375dd33..8859960ee891 100644
  	/* Invalidate the TLB, just in case */
  	arm_smmu_gr0_write(smmu, ARM_SMMU_GR0_TLBIALLH, QCOM_DUMMY_VAL);
  	arm_smmu_gr0_write(smmu, ARM_SMMU_GR0_TLBIALLNSNH, QCOM_DUMMY_VAL);
-@@ -3476,6 +3528,58 @@ err_reset_platform_ops: __maybe_unused;
+@@ -3476,6 +3528,72 @@ err_reset_platform_ops: __maybe_unused;
  	return err;
  }
  
@@ -132,7 +132,7 @@ index b5067375dd33..8859960ee891 100644
 +static void arm_smmu_mark_hw_smrs(struct arm_smmu_device *smmu)
 +{
 +	u32 smr, s2cr;
-+	int i, used = 0;
++	int i, used = 0, cbs = 0;
 +
 +	if (!smmu->smrs || !smmu->s2crs)
 +		return;
@@ -160,18 +160,32 @@ index b5067375dd33..8859960ee891 100644
 +		smmu->s2crs[i].privcfg = FIELD_GET(ARM_SMMU_S2CR_PRIVCFG, s2cr);
 +		smmu->s2crs[i].cbndx = FIELD_GET(ARM_SMMU_S2CR_CBNDX, s2cr);
 +		smmu->s2crs[i].pinned = true;
++
++		/*
++		 * MUY importante: reservar tambien el CONTEXT BANK del firmware.
++		 * El handoff downstream hace bitmap_set(context_map, cbndx) por esto:
++		 * si no lo marcamos, cuando Linux enlaza un master nuevo (el SDE del
++		 * display, p.ej.) le asigna un CB que el firmware YA usaba para otro
++		 * master (el eMMC) -> aquel pierde su contexto y su DMA revienta.
++		 * Visto en el T5: con el display arriba, la primera lectura del eMMC
++		 * (fsck/mount de mmcblk0p62) reseteaba el SoC a EDL.
++		 */
++		if (smmu->s2crs[i].type == S2CR_TYPE_TRANS) {
++			bitmap_set(smmu->context_map, smmu->s2crs[i].cbndx, 1);
++			cbs++;
++		}
 +		used++;
 +	}
 +
 +	dev_err(smmu->dev,
-+		"DACE-SMMU %s: tabla del firmware: %d/%d SMR en uso\n",
-+		dev_name(smmu->dev), used, smmu->num_mapping_groups);
++		"DACE-SMMU %s: tabla del firmware: %d/%d SMR en uso, %d context banks reservados\n",
++		dev_name(smmu->dev), used, smmu->num_mapping_groups, cbs);
 +}
 +
  static int arm_smmu_device_probe(struct platform_device *pdev)
  {
  	struct resource *res;
-@@ -3560,9 +3664,13 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
+@@ -3560,9 +3678,13 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
  	if (err)
  		return err;
  
@@ -186,7 +200,7 @@ index b5067375dd33..8859960ee891 100644
  
  	err = arm_smmu_parse_impl_def_registers(smmu);
  	if (err)
-@@ -3606,10 +3714,17 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
+@@ -3606,10 +3728,17 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
  		goto out_power_off;
  	smmu->phys_addr = res->start;
  	parse_driver_options(smmu);
@@ -205,7 +219,7 @@ index b5067375dd33..8859960ee891 100644
  	err = iommu_device_sysfs_add(&smmu->iommu, smmu->dev, NULL,
  				     "smmu.%pa", &ioaddr);
  	if (err) {
-@@ -3623,10 +3738,15 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
+@@ -3623,10 +3752,15 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
  		goto err_sysfs_remove;
  	}
  
@@ -221,7 +235,7 @@ index b5067375dd33..8859960ee891 100644
  
  	/*
  	 * We want to avoid touching dev->power.lock in fastpaths unless
-@@ -3649,11 +3769,14 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
+@@ -3649,11 +3783,14 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
  	 * ready to handle default domain setup as soon as any SMMU exists.
  	 */
  	if (!using_legacy_binding) {

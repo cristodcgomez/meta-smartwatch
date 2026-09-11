@@ -183,8 +183,17 @@ done
 mark "sdcard post-wait (w=${w})"
 
 if [ -e /dev/$sdcard_partition ]; then
-    /sbin/fsck.ext4 -p /dev/$sdcard_partition 2>/dev/null
     FSTYPE=${sdcard_fstype:-auto}
+    # OJO: NO correr fsck.ext4 sobre la userdata: en dace.conf esta declarada
+    # como F2FS (sdcard_fstype=f2fs). Con -p (preen) e2fsck INTENTA REPARAR y
+    # escribiria metadatos ext4 sobre una particion F2FS. Solo se hace fsck si
+    # el fstype de verdad es ext4.
+    if [ "$FSTYPE" = "ext4" ]; then
+        mark "fsck ext4..."
+        /sbin/fsck.ext4 -p /dev/$sdcard_partition 2>/dev/null
+        mark "fsck ext4 hecho"
+    fi
+    mark "montando $FSTYPE $sdcard_partition"
     mount -t $FSTYPE -o rw,noatime,nodiratime /dev/$sdcard_partition /sdcard 2>/dev/null
     mark "mount sdcard rc=$?"
 else
