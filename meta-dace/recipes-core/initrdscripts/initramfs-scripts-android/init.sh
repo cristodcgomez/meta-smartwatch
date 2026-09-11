@@ -244,16 +244,16 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
     # persiste: el PRIMER arranque con este lote hace la prueba y los
     # siguientes arrancan normal -> si el SoC se resetea a EDL no hay boot-loop
     # (basta un apagado/encendido).
-    if [ ! -e "$BOOT_DIR/etc/dace-qnoc-test-v5-done" ]; then
-        : > "$BOOT_DIR/etc/dace-qnoc-test-v5-done"
+    if [ ! -e "$BOOT_DIR/etc/dace-qnoc-test-v6-done" ]; then
+        : > "$BOOT_DIR/etc/dace-qnoc-test-v6-done"
         sync
         setup_usb_console
         sleep 3
         mark "TEST: consola arriba, modprobe qnoc-monaco"
         modprobe qnoc-monaco 2>/dev/kmsg
         info "TEST: modprobe qnoc-monaco rc=$?"
-        mark "TEST: modprobe hecho (espero 45s)"
-        sleep 45
+        mark "TEST: modprobe hecho (espero 15s)"
+        sleep 15
         # Volcado de diagnostico ANTES de switch_root (que es donde el eMMC da
         # ADMA error y el SoC resetea): queremos saber si msm_drm probe y si
         # hay /dev/dri, para no confundir "display no probo" con "crash luego".

@@ -27,7 +27,7 @@ paso alcanzado del probe (el T5 no tiene UART).
 Upstream-Status: Inappropriate [dace bring-up]
 ---
 diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu.c b/drivers/iommu/arm/arm-smmu/arm-smmu.c
-index b5067375dd33..358cd589a294 100644
+index b5067375dd33..8859960ee891 100644
 --- a/drivers/iommu/arm/arm-smmu/arm-smmu.c
 +++ b/drivers/iommu/arm/arm-smmu/arm-smmu.c
 @@ -84,6 +84,39 @@ MODULE_PARM_DESC(disable_bypass,
@@ -112,7 +112,66 @@ index b5067375dd33..358cd589a294 100644
  	/* Invalidate the TLB, just in case */
  	arm_smmu_gr0_write(smmu, ARM_SMMU_GR0_TLBIALLH, QCOM_DUMMY_VAL);
  	arm_smmu_gr0_write(smmu, ARM_SMMU_GR0_TLBIALLNSNH, QCOM_DUMMY_VAL);
-@@ -3560,9 +3612,13 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
+@@ -3476,6 +3528,58 @@ err_reset_platform_ops: __maybe_unused;
+ 	return err;
+ }
+ 
++/*
++ * dace (TicWatch Pro 5 / monaco): con "qcom,skip-init" el firmware/TZ dejo la
++ * tabla SMR/S2CR ya programada en el apps-smmu (el eMMC, el display y demas
++ * masters tienen sus entradas) y Linux NO la reescribe. El problema es que
++ * smmu->smrs[]/s2crs[] arrancan vacios, asi que arm_smmu_find_sme() cree que
++ * TODAS las entradas estan libres: arm_smmu_test_smr_masks() escribe SMR(0) sin
++ * el bit VALID y arm_smmu_add_device() asigna SMRs encima -> un master ya
++ * configurado por el firmware pierde su traduccion. Visto en el T5:
++ * el eMMC tiene iommus = <&apps_smmu 0xc0 0> + qcom,iommu-dma = "bypass", y
++ * tras cargar qnoc aparece "mmc0: ADMA error: 0x02000000" y el SoC resetea a
++ * EDL. Leemos la tabla viva y marcamos las entradas en uso como validas y
++ * pinned para que Linux las respete.
++ */
++static void arm_smmu_mark_hw_smrs(struct arm_smmu_device *smmu)
++{
++	u32 smr, s2cr;
++	int i, used = 0;
++
++	if (!smmu->smrs || !smmu->s2crs)
++		return;
++
++	for (i = 0; i < smmu->num_mapping_groups; ++i) {
++		smr = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_SMR(i));
++		s2cr = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_S2CR(i));
++
++		if (smmu->features & ARM_SMMU_FEAT_EXIDS) {
++			if (!FIELD_GET(ARM_SMMU_S2CR_EXIDVALID, s2cr))
++				continue;
++		} else {
++			if (!FIELD_GET(ARM_SMMU_SMR_VALID, smr))
++				continue;
++		}
++
++		smmu->smrs[i].id = FIELD_GET(ARM_SMMU_SMR_ID, smr);
++		smmu->smrs[i].mask = FIELD_GET(ARM_SMMU_SMR_MASK, smr);
++		smmu->smrs[i].valid = true;
++		smmu->smrs[i].pinned = true;
++
++		smmu->s2crs[i].group = NULL;
++		smmu->s2crs[i].count = 0;
++		smmu->s2crs[i].type = FIELD_GET(ARM_SMMU_S2CR_TYPE, s2cr);
++		smmu->s2crs[i].privcfg = FIELD_GET(ARM_SMMU_S2CR_PRIVCFG, s2cr);
++		smmu->s2crs[i].cbndx = FIELD_GET(ARM_SMMU_S2CR_CBNDX, s2cr);
++		smmu->s2crs[i].pinned = true;
++		used++;
++	}
++
++	dev_err(smmu->dev,
++		"DACE-SMMU %s: tabla del firmware: %d/%d SMR en uso\n",
++		dev_name(smmu->dev), used, smmu->num_mapping_groups);
++}
++
+ static int arm_smmu_device_probe(struct platform_device *pdev)
+ {
+ 	struct resource *res;
+@@ -3560,9 +3664,13 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
  	if (err)
  		return err;
  
@@ -127,10 +186,12 @@ index b5067375dd33..358cd589a294 100644
  
  	err = arm_smmu_parse_impl_def_registers(smmu);
  	if (err)
-@@ -3606,10 +3662,15 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
+@@ -3606,10 +3714,17 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
  		goto out_power_off;
  	smmu->phys_addr = res->start;
  	parse_driver_options(smmu);
++	if (smmu->options & ARM_SMMU_OPT_SKIP_INIT)
++		arm_smmu_mark_hw_smrs(smmu);
 +	dace_smmu_mark(dev, 0x0000ff00, "S3 handoff_cbs START");
  	err = arm_smmu_handoff_cbs(smmu);
 -	if (err)
@@ -144,7 +205,7 @@ index b5067375dd33..358cd589a294 100644
  	err = iommu_device_sysfs_add(&smmu->iommu, smmu->dev, NULL,
  				     "smmu.%pa", &ioaddr);
  	if (err) {
-@@ -3623,10 +3684,15 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
+@@ -3623,10 +3738,15 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
  		goto err_sysfs_remove;
  	}
  
@@ -160,7 +221,7 @@ index b5067375dd33..358cd589a294 100644
  
  	/*
  	 * We want to avoid touching dev->power.lock in fastpaths unless
-@@ -3649,11 +3715,14 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
+@@ -3649,11 +3769,14 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
  	 * ready to handle default domain setup as soon as any SMMU exists.
  	 */
  	if (!using_legacy_binding) {
