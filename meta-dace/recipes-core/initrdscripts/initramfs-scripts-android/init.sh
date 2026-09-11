@@ -261,7 +261,9 @@ DEBUG_RAMFS=0
 #   boot noautoload    -> + vacia modules-load.d/dace-post-rootfs.conf
 #   boot nolxc         -> + enmascara dace-lxc-android
 #   boot console       -> + UDC para la consola del kernel (sin adb)
-#   boot noautoload nolxc console   (combinable)
+#   boot crashlog      -> + snapshot de dmesg en /var/log/dace-crash.log cada
+#                         segundo (sobrevive a un reset duro a EDL)
+#   boot noautoload nolxc crashlog   (combinable)
 #
 #   adb shell 'echo "boot noautoload nolxc" > /sdcard/dace-mode; reboot'
 DEBUG_MODE=""
@@ -385,15 +387,15 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
         mark "nolxc: dace-lxc-android enmascarado"
     fi
     mark "rootfs ok, switch_root"
-    # ── CRASHLOG A PRUEBA DE BALAS ──────────────────────────────────
-    # Lanzado DESDE EL INITRAMFS, no depende de que arranque ningun unit de
-    # systemd (el dace-crashlog.service no llego a arrancar y perdimos el
-    # crash). El proceso sigue vivo tras switch_root y sigue escribiendo en el
-    # rootfs (los mounts siguen en la tabla: $BOOT_DIR sigue resolviendo), asi
-    # que el ultimo segundo de dmesg queda EN DISCO cuando el SoC resetea a
-    # EDL (el rootfs va montado con 'sync'). Solo en modo debug, para no
-    # castigar la eMMC en arranques normales.
-    if [ -n "$DEBUG_MODE" ]; then
+    # ── CRASHLOG A PRUEBA DE BALAS (opt-in: modo "boot crashlog") ────
+    # Solo si el modo lo pide: escribe ~30 KB/s y eso castiga la eMMC si se
+    # deja siempre. Lanzado DESDE EL INITRAMFS, no depende de que arranque
+    # ningun unit de systemd (el dace-crashlog.service no llegaba a arrancar y
+    # se perdio el crash). El proceso sigue vivo tras switch_root y sigue
+    # escribiendo en el rootfs (los mounts siguen en la tabla: $BOOT_DIR sigue
+    # resolviendo), asi que el ultimo segundo de dmesg queda en disco cuando el
+    # SoC resetea a EDL.
+    case " $DEBUG_MODE " in *" crashlog "*)
         (
             while true; do
                 {
@@ -405,7 +407,8 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
             done
         ) &
         mark "crashlog del initramfs lanzado -> $BOOT_DIR/var/log/dace-crash.log"
-    fi
+    ;;
+    esac
     [ -e /init.machine ] && /init.machine $BOOT_DIR > /dev/kmsg 2>&1 || true
     setup_devtmpfs $BOOT_DIR
     umount -l /proc 2>/dev/null; umount -l /sys 2>/dev/null

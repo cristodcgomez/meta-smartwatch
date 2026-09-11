@@ -1,9 +1,16 @@
-SUMMARY = "Auto-load post-rootfs dace kernel modules at boot"
-DESCRIPTION = "Drops a systemd-modules-load.d config that loads the WLAN, \
-ALSA/ASoC machine + codec, and BT slim modules shipped on the rootfs by \
-linux-dace-modules. These cannot live in modules.load.dace because \
-their .ko files are only reachable AFTER pivot_root to the rootfs (the \
-VKB ramdisk holds only the boot-critical modules)."
+SUMMARY = "dace: modulos post-rootfs (lista de autoload + blacklist de vendor)"
+DESCRIPTION = "Los .ko de /lib/modules/<krel>/vendor/ (linux-dace-modules) \
+solo son alcanzables DESPUES del switch_root al rootfs (el ramdisk del VKB \
+solo lleva los criticos del boot), asi que su carga va por \
+systemd-modules-load.d/dace-post-rootfs.conf. \
+OJO: ese fichero se entrega CON LA LISTA COMENTADA porque esa cadena de \
+modulos (WLAN/icnss2 + ASoC + BT) tumba el SoC a EDL a los ~10 s: el \
+disparador real es el coldplug de udev por modalias, pero \
+systemd-modules-load hace 'modprobe <modulo>' explicito y 'blacklist' NO \
+bloquea eso (solo los alias). De ahi que ademas se instale \
+/etc/modprobe.d/00-dace-vendor-blacklist.conf (76 modulos, bloquea a udev) y \
+que la lista de autoload tenga que quedar comentada hasta bisecar el culpable: \
+descomentar lineas es la forma de bisecarlo."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 COMPATIBLE_MACHINE = "dace"
