@@ -18,6 +18,7 @@ Ademas se imprimen los IDs del chip (rev/fw/vendor/hw) al inicializar, para
 poder confirmar que es un BT541 compatible (el node declara
 zinitix,pname="SM-G5308W" y x/y_resolution=0x1d1=465, la resolucion del panel).
 
+Upstream-Status: Inappropriate [dace bring-up]
 --- 
 diff --git a/drivers/input/touchscreen/zinitix.c b/drivers/input/touchscreen/zinitix.c
 index 400957f4c8c9..18c65858d17b 100644
