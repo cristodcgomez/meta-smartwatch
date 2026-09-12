@@ -20,7 +20,7 @@ zinitix,pname="SM-G5308W" y x/y_resolution=0x1d1=465, la resolucion del panel).
 Upstream-Status: Inappropriate [dace bring-up]
 ---
 diff --git a/drivers/input/touchscreen/zinitix.c b/drivers/input/touchscreen/zinitix.c
-index 400957f4c8c9..4f28cf9412de 100644
+index 400957f4c8c9..c11f2afa3399 100644
 --- a/drivers/input/touchscreen/zinitix.c
 +++ b/drivers/input/touchscreen/zinitix.c
 @@ -1,12 +1,17 @@
@@ -71,7 +71,7 @@ index 400957f4c8c9..4f28cf9412de 100644
  };
  
  static int zinitix_read_data(struct i2c_client *client,
-@@ -247,9 +272,50 @@ static int zinitix_init_touch(struct bt541_ts_data *bt541)
+@@ -247,9 +272,74 @@ static int zinitix_init_touch(struct bt541_ts_data *bt541)
  		udelay(10);
  	}
  
@@ -93,6 +93,30 @@ index 400957f4c8c9..4f28cf9412de 100644
  	return 0;
  }
  
++/* dace bring-up: escaneo de direcciones i2c para saber si el bus funciona y
++ * donde contesta algo (el chip no responde a 0x20 -> -ENOTCONN=I2C_ADDR_NACK).
++ * Se hace una lectura de 1 byte a cada direccion 0x08..0x77. */
++static void zinitix_dace_i2c_scan(struct i2c_client *client)
++{
++	int addr, found = 0;
++	u8 val;
++
++	for (addr = 0x08; addr < 0x78; addr++) {
++		struct i2c_msg msg = {
++			.addr = addr,
++			.flags = I2C_M_RD,
++			.len = 1,
++			.buf = &val,
++		};
++		if (i2c_transfer(client->adapter, &msg, 1) == 1) {
++			dev_info(&client->dev, "DACE-SCAN: 0x%02x responde\n", addr);
++			found++;
++		}
++	}
++	dev_info(&client->dev, "DACE-SCAN: fin, %d dispositivo(s) en el bus\n",
++		 found);
++}
++
 +static void zinitix_panel_event_handler(enum panel_event_notifier_tag tag,
 +					struct panel_event_notification *notif,
 +					void *pvt_data)
@@ -122,7 +146,7 @@ index 400957f4c8c9..4f28cf9412de 100644
  static int zinitix_init_regulators(struct bt541_ts_data *bt541)
  {
  	struct i2c_client *client = bt541->client;
-@@ -257,6 +323,14 @@ static int zinitix_init_regulators(struct bt541_ts_data *bt541)
+@@ -257,6 +347,14 @@ static int zinitix_init_regulators(struct bt541_ts_data *bt541)
  
  	bt541->supplies[0].supply = "vdd";
  	bt541->supplies[1].supply = "vddo";
@@ -137,7 +161,7 @@ index 400957f4c8c9..4f28cf9412de 100644
  	error = devm_regulator_bulk_get(&client->dev,
  					ARRAY_SIZE(bt541->supplies),
  					bt541->supplies);
-@@ -265,6 +339,10 @@ static int zinitix_init_regulators(struct bt541_ts_data *bt541)
+@@ -265,6 +363,10 @@ static int zinitix_init_regulators(struct bt541_ts_data *bt541)
  		return error;
  	}
  
@@ -148,7 +172,7 @@ index 400957f4c8c9..4f28cf9412de 100644
  	return 0;
  }
  
-@@ -378,6 +456,9 @@ static int zinitix_start(struct bt541_ts_data *bt541)
+@@ -378,6 +480,9 @@ static int zinitix_start(struct bt541_ts_data *bt541)
  {
  	int error;
  
@@ -158,12 +182,14 @@ index 400957f4c8c9..4f28cf9412de 100644
  	error = regulator_bulk_enable(ARRAY_SIZE(bt541->supplies),
  				      bt541->supplies);
  	if (error) {
-@@ -388,7 +469,57 @@ static int zinitix_start(struct bt541_ts_data *bt541)
+@@ -388,7 +493,59 @@ static int zinitix_start(struct bt541_ts_data *bt541)
  
  	msleep(CHIP_ON_DELAY);
  
 -	error = zinitix_send_power_on_sequence(bt541);
 +	dev_info(&bt541->client->dev, "DACE-TS: reguladores ON\n");
++
++	zinitix_dace_i2c_scan(bt541->client);
 +
 +	/* pinctrl ACTIVO: configura gpio12 (reset) y gpio13 (irq, pull-up). El
 +	 * driver del vendor lo hace y el mainline no. */
@@ -217,7 +243,7 @@ index 400957f4c8c9..4f28cf9412de 100644
  	if (error) {
  		dev_err(&bt541->client->dev,
  			"Error while sending power-on sequence: %d\n", error);
-@@ -402,7 +533,10 @@ static int zinitix_start(struct bt541_ts_data *bt541)
+@@ -402,7 +559,10 @@ static int zinitix_start(struct bt541_ts_data *bt541)
  		return error;
  	}
  
@@ -228,7 +254,7 @@ index 400957f4c8c9..4f28cf9412de 100644
  
  	return 0;
  }
-@@ -413,6 +547,9 @@ static int zinitix_stop(struct bt541_ts_data *bt541)
+@@ -413,6 +573,9 @@ static int zinitix_stop(struct bt541_ts_data *bt541)
  
  	disable_irq(bt541->client->irq);
  
@@ -238,7 +264,7 @@ index 400957f4c8c9..4f28cf9412de 100644
  	error = regulator_bulk_disable(ARRAY_SIZE(bt541->supplies),
  				       bt541->supplies);
  	if (error) {
-@@ -507,6 +644,63 @@ static int zinitix_ts_probe(struct i2c_client *client)
+@@ -507,6 +670,63 @@ static int zinitix_ts_probe(struct i2c_client *client)
  	bt541->client = client;
  	i2c_set_clientdata(client, bt541);
  
