@@ -197,13 +197,20 @@ do_compile() {
         "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb \
             /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
             compatible "zinitix,zinitix-ts" "zinitix,bt541"
-        # El driver mainline pide DOS reguladores con regulator_bulk_get
-        # ("vdd" y "vddo") y el get en bloque FALLA si falta uno: el nodo del T5
-        # solo declara vdd (0x84), vdd-v1 (0x83) y vcc_i2c (0x85). El "vddo" del
-        # Zinitix es su rail de I/O, que aqui es el vdd-v1 -> se apunta ahi.
+        # REGULADORES DEL TACTIL. El nodo del T5 declara tres rieles del PMIC
+        # (vdd=0x84, vdd-v1=0x83, vcc_i2c=0x85) y el driver del vendor los
+        # enciende los tres. El mainline solo pedia "vdd"+"vddo" (bulk get, que
+        # FALLA si falta una propiedad) y con solo esos dos el chip NO contesta
+        # a su direccion i2c:
+        #   zinitix_start: "Error while sending power-on sequence: -107"
+        #   (-107 = -ENOTCONN = I2C_ADDR_NACK, en drivers/i2c/busses/i2c-msm-geni.c)
+        # El "vddo" del Zinitix es su rail de I/O, que aqui es "vcc_i2c" (0x85):
+        # se crea la propiedad vddo-supply apuntando ahi. Y el driver va
+        # parcheado para pedir tambien "vdd-v1" (0x83), de forma que quedan
+        # encendidos los TRES rieles.
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb \
             /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
-            vddo-supply 0x83
+            vddo-supply 0x85
         # zinitix_init_input_dev() llama a touchscreen_parse_properties(), que
         # exige las props ESTANDAR touchscreen-size-x/y; el DT del T5 solo trae
         # las del vendor (zinitix,x_resolution/y_resolution = 0x1d1 = 465, que es
@@ -224,7 +231,7 @@ do_compile() {
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb \
             /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
             reset-gpios 0x69 0x0c 0x1
-        bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, sin OPP) + tactil zinitix bt541"
+        bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, sin OPP) + tactil zinitix bt541 (3 rieles: vdd+vddo->vcc_i2c+vdd-v1)"
     done
     cat ${WORKDIR}/monaco-real-per.dtb ${WORKDIR}/monacop-per.dtb > ${WORKDIR}/dtb-blob-vendor.bin
     bbnote "DTB blob vendor_boot: $(stat -c%s ${WORKDIR}/dtb-blob-vendor.bin) bytes (stock=572016)"

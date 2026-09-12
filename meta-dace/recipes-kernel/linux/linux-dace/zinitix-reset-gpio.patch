@@ -7,12 +7,11 @@ compatible "zinitix,zinitix-ts", que el driver mainline no aceptaba (solo
 vddo-supply (regulator_bulk_get pide vdd+vddo) y las touchscreen-size-x/y
 (touchscreen_parse_properties) llega al final del probe.
 
-Pero la IRQ nunca disparaba al tocar (contador 0 en /proc/interrupts) aunque el
-chip RESPONDE POR I2C (zinitix_start hace su secuencia de power-on sin errores):
-faltaba el RESET POR HARDWARE que el driver del vendor si hacia y el mainline no
-mira. El DT del T5 lo declara con nombre de vendor (zinitix,reset-gpio =
-<0x69 0x0c 0x00>, gpio 12 del TLMM); aqui se usa la propiedad ESTANDAR
-(reset-gpios, que se anade por fdtput) y se pulsa el reset en zinitix_start().
+Ademas se pulsa el RESET POR HARDWARE (el DT del T5 lo declara con nombre de
+vendor: zinitix,reset-gpio = <0x69 0x0c 0x00>, gpio 12 del TLMM; aqui se usa la
+propiedad ESTANDAR reset-gpios, anadida por fdtput) y se encienden los TRES
+reguladores del nodo. Medido en el reloj: con solo vdd+vddo el chip NO contesta
+a su direccion i2c y zinitix_start devuelve -107 (-ENOTCONN = I2C_ADDR_NACK).
 
 Ademas se imprimen los IDs del chip (rev/fw/vendor/hw) al inicializar, para
 poder confirmar que es un BT541 compatible (el node declara
@@ -21,7 +20,7 @@ zinitix,pname="SM-G5308W" y x/y_resolution=0x1d1=465, la resolucion del panel).
 Upstream-Status: Inappropriate [dace bring-up]
 ---
 diff --git a/drivers/input/touchscreen/zinitix.c b/drivers/input/touchscreen/zinitix.c
-index 400957f4c8c9..e9324329ed7a 100644
+index 400957f4c8c9..5ee033d289a6 100644
 --- a/drivers/input/touchscreen/zinitix.c
 +++ b/drivers/input/touchscreen/zinitix.c
 @@ -1,6 +1,7 @@
@@ -32,10 +31,12 @@ index 400957f4c8c9..e9324329ed7a 100644
  #include <linux/i2c.h>
  #include <linux/input.h>
  #include <linux/input/mt.h>
-@@ -145,6 +146,11 @@ struct bt541_ts_data {
+@@ -144,7 +145,12 @@ struct bt541_ts_data {
+ 	struct i2c_client *client;
  	struct input_dev *input_dev;
  	struct touchscreen_properties prop;
- 	struct regulator_bulk_data supplies[2];
+-	struct regulator_bulk_data supplies[2];
++	struct regulator_bulk_data supplies[4];
 +	/* Reset por hardware: el DT del T5 declara 'zinitix,reset-gpio' (gpio 12
 +	 * del TLMM) y el driver del vendor lo pulsa al arrancar. El mainline no
 +	 * lo miraba: el chip respondia por i2c pero no reportaba toques (la IRQ
@@ -66,7 +67,33 @@ index 400957f4c8c9..e9324329ed7a 100644
  	return 0;
  }
  
-@@ -378,6 +399,9 @@ static int zinitix_start(struct bt541_ts_data *bt541)
+@@ -257,6 +278,14 @@ static int zinitix_init_regulators(struct bt541_ts_data *bt541)
+ 
+ 	bt541->supplies[0].supply = "vdd";
+ 	bt541->supplies[1].supply = "vddo";
++	/* dace: el nodo del T5 declara CUATRO rieles (vdd=0x84, vdd-v1=0x83,
++	 * vcc_i2c=0x85) y el driver del vendor los enciende todos. El mainline
++	 * solo conocia vdd+vddo y con eso el chip NO contesta a su direccion
++	 * i2c: zinitix_start -> "power-on sequence: -107" (-107 = -ENOTCONN =
++	 * I2C_ADDR_NACK, i2c-msm-geni.c:200). Se anaden los otros dos por el
++	 * nombre que ya tienen en el DT (no hace falta tocar el DT). */
++	bt541->supplies[2].supply = "vdd-v1";
++	bt541->supplies[3].supply = "vcc_i2c";
+ 	error = devm_regulator_bulk_get(&client->dev,
+ 					ARRAY_SIZE(bt541->supplies),
+ 					bt541->supplies);
+@@ -265,6 +294,10 @@ static int zinitix_init_regulators(struct bt541_ts_data *bt541)
+ 		return error;
+ 	}
+ 
++	dev_info(&client->dev, "DACE-TS: reguladores pedidos: %s+%s+%s+%s\n",
++		 bt541->supplies[0].supply, bt541->supplies[1].supply,
++		 bt541->supplies[2].supply, bt541->supplies[3].supply);
++
+ 	return 0;
+ }
+ 
+@@ -378,6 +411,9 @@ static int zinitix_start(struct bt541_ts_data *bt541)
  {
  	int error;
  
@@ -76,7 +103,7 @@ index 400957f4c8c9..e9324329ed7a 100644
  	error = regulator_bulk_enable(ARRAY_SIZE(bt541->supplies),
  				      bt541->supplies);
  	if (error) {
-@@ -388,6 +412,20 @@ static int zinitix_start(struct bt541_ts_data *bt541)
+@@ -388,6 +424,20 @@ static int zinitix_start(struct bt541_ts_data *bt541)
  
  	msleep(CHIP_ON_DELAY);
  
@@ -97,7 +124,7 @@ index 400957f4c8c9..e9324329ed7a 100644
  	error = zinitix_send_power_on_sequence(bt541);
  	if (error) {
  		dev_err(&bt541->client->dev,
-@@ -402,7 +440,10 @@ static int zinitix_start(struct bt541_ts_data *bt541)
+@@ -402,7 +452,10 @@ static int zinitix_start(struct bt541_ts_data *bt541)
  		return error;
  	}
  
@@ -108,7 +135,7 @@ index 400957f4c8c9..e9324329ed7a 100644
  
  	return 0;
  }
-@@ -507,6 +548,12 @@ static int zinitix_ts_probe(struct i2c_client *client)
+@@ -507,6 +560,12 @@ static int zinitix_ts_probe(struct i2c_client *client)
  	bt541->client = client;
  	i2c_set_clientdata(client, bt541);
  
