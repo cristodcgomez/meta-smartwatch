@@ -1,0 +1,73 @@
+diff --git a/drivers/input/touchscreen/zinitix.c b/drivers/input/touchscreen/zinitix.c
+index 400957f4c8c9..18c65858d17b 100644
+--- a/drivers/input/touchscreen/zinitix.c
++++ b/drivers/input/touchscreen/zinitix.c
+@@ -1,6 +1,7 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ 
+ #include <linux/delay.h>
++#include <linux/gpio/consumer.h>
+ #include <linux/i2c.h>
+ #include <linux/input.h>
+ #include <linux/input/mt.h>
+@@ -145,6 +146,11 @@ struct bt541_ts_data {
+ 	struct input_dev *input_dev;
+ 	struct touchscreen_properties prop;
+ 	struct regulator_bulk_data supplies[2];
++	/* Reset por hardware: el DT del T5 declara 'zinitix,reset-gpio' (gpio 12
++	 * del TLMM) y el driver del vendor lo pulsa al arrancar. El mainline no
++	 * lo miraba: el chip respondia por i2c pero no reportaba toques (la IRQ
++	 * nunca disparaba). */
++	struct gpio_desc *reset_gpio;
+ 	u32 zinitix_mode;
+ };
+ 
+@@ -247,6 +253,21 @@ static int zinitix_init_touch(struct bt541_ts_data *bt541)
+ 		udelay(10);
+ 	}
+ 
++	/* dace: identidad del chip (para comparar con el bt541 del driver) */
++	{
++		u16 rev = 0, fw = 0, vid = 0, hwid = 0;
++		if (!zinitix_read_data(client, BT541_CHIP_REVISION, &rev, 2) &&
++		    !zinitix_read_data(client, BT541_FIRMWARE_VERSION, &fw, 2) &&
++		    !zinitix_read_data(client, BT541_VENDOR_ID, &vid, 2) &&
++		    !zinitix_read_data(client, BT541_HW_ID, &hwid, 2))
++			dev_info(&client->dev,
++				 "DACE-TS: chip rev=%u fw=%u vendor=%u hw=%u mode=%u\n",
++				 rev, fw, vid, hwid, bt541->zinitix_mode);
++		else
++			dev_info(&client->dev,
++				 "DACE-TS: no se pudieron leer los IDs del chip\n");
++	}
++
+ 	return 0;
+ }
+ 
+@@ -388,6 +409,13 @@ static int zinitix_start(struct bt541_ts_data *bt541)
+ 
+ 	msleep(CHIP_ON_DELAY);
+ 
++	if (bt541->reset_gpio) {
++		gpiod_set_value_cansleep(bt541->reset_gpio, 0);
++		msleep(20);
++		gpiod_set_value_cansleep(bt541->reset_gpio, 1);
++		msleep(120);
++	}
++
+ 	error = zinitix_send_power_on_sequence(bt541);
+ 	if (error) {
+ 		dev_err(&bt541->client->dev,
+@@ -507,6 +535,12 @@ static int zinitix_ts_probe(struct i2c_client *client)
+ 	bt541->client = client;
+ 	i2c_set_clientdata(client, bt541);
+ 
++	bt541->reset_gpio = devm_gpiod_get_optional(&client->dev, "reset",
++						    GPIOD_OUT_HIGH);
++	if (IS_ERR(bt541->reset_gpio))
++		return dev_err_probe(&client->dev, PTR_ERR(bt541->reset_gpio),
++				     "Failed to get reset GPIO\n");
++
+ 	error = zinitix_init_regulators(bt541);
+ 	if (error) {
+ 		dev_err(&client->dev,

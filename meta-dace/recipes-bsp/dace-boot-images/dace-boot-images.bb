@@ -216,6 +216,14 @@ do_compile() {
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb \
             /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
             touchscreen-size-y 0x1d1
+        # reset-gpios (propiedad ESTANDAR): el DT del T5 solo trae la del vendor
+        # (zinitix,reset-gpio = <0x69 0x0c 0x00> = gpio 12 del TLMM). El driver
+        # parcheado la pide con devm_gpiod_get_optional(..., "reset", ...) y
+        # pulsa el reset al arrancar el chip (sin eso respondia por i2c pero no
+        # reportaba toques). Flag 1 = GPIO_ACTIVE_LOW (lo normal en un reset).
+        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb \
+            /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
+            reset-gpios 0x69 0x0c 0x1
         bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, sin OPP) + tactil zinitix bt541"
     done
     cat ${WORKDIR}/monaco-real-per.dtb ${WORKDIR}/monacop-per.dtb > ${WORKDIR}/dtb-blob-vendor.bin
