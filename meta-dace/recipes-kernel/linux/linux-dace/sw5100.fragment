@@ -146,4 +146,4 @@ CONFIG_STACKPROTECTOR_STRONG=y
 # /dev/input/eventX de tactil (el compositor arrancaba con
 # evdevtouch:/dev/input/event2, que no existe). Su unica dependencia (I2C) se
 # cumple. Se pone =y para que probe en el arranque sin depender de modprobe.
-CONFIG_TOUCHSCREEN_ZINITIX=y
+CONFIG_TOUCHSCREEN_ZINITIX=m

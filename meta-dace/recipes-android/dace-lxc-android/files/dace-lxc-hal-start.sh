@@ -28,6 +28,17 @@ for svc in vendor.qti.hardware.display.allocator vendor.qti.hardware.display.com
     sleep 2
 done
 
+# TACTIL: cargar el driver Zinitix AHORA (no antes). Con el driver presente
+# desde el arranque, el composer-service de Qualcomm muere con SIGSEGV ~0.2 s
+# despues de crear /dev/socket/pps y la UI se queda sin composer. El nodo del
+# táctil esta enlazado al panel (propiedad 'panel') y el stack de display
+# reacciona a él, asi que se deja para el final.
+modprobe zinitix 2>/dev/null && echo "dace-lxc-hal-start: tactil zinitix cargado" \
+    || echo "dace-lxc-hal-start: aviso, no se pudo cargar zinitix"
+sleep 3
+grep -q "Zinitix" /proc/bus/input/devices 2>/dev/null && echo "dace-hal: táctil presente (event2)" \
+    || echo "dace-hal: táctil AUSENTE"
+
 # Comprobacion: que el servicio responda (el cliente lo pide por el bus)
 sleep 5
 lxc-attach -n android -- /system/bin/sh -c '
