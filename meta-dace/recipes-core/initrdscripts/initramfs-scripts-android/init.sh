@@ -286,6 +286,16 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
     # para obtener dominio IOMMU. Si quedara un blacklist de un boot anterior,
     # borrarlo (el modulo ya esta cargado, pero el archivo confunde).
     rm -f $BOOT_DIR/etc/modprobe.d/00-dace-no-qnoc.conf
+    # Tactil: que udev NO cargue el driver zinitix en el coldplug (~10 s). El
+    # tactil va DESPUES de los HAL de display (dace-lxc-hal-start.sh hace
+    # 'modprobe zinitix'): si el driver esta presente antes, el composer-service
+    # de Qualcomm muere con SIGSEGV y la UI se queda sin composer.
+    BL="$BOOT_DIR/etc/modprobe.d/00-dace-vendor-blacklist.conf"
+    if ! grep -qs '^blacklist zinitix' "$BL"; then
+        mkdir -p "$BOOT_DIR/etc/modprobe.d"
+        printf '\n# tactil: se carga despues de los HAL de display (modprobe zinitix)\nblacklist zinitix\n' >> "$BL"
+        info "blacklist zinitix anadida (tactil se carga tras los HAL)"
+    fi
     # mce: quitar el filtro de brillo por sensor de luz (ALS). El T5 no tiene
     # ALS funcional (sensorfwd entra en crash-loop y el sensor de proximidad da
     # datos basura por evdev), y con el filtro activo mce cae al perfil mas
