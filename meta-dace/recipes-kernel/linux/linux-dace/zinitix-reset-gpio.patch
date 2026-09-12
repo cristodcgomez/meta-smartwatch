@@ -21,7 +21,7 @@ zinitix,pname="SM-G5308W" y x/y_resolution=0x1d1=465, la resolucion del panel).
 Upstream-Status: Inappropriate [dace bring-up]
 ---
 diff --git a/drivers/input/touchscreen/zinitix.c b/drivers/input/touchscreen/zinitix.c
-index 400957f4c8c9..18c65858d17b 100644
+index 400957f4c8c9..e9324329ed7a 100644
 --- a/drivers/input/touchscreen/zinitix.c
 +++ b/drivers/input/touchscreen/zinitix.c
 @@ -1,6 +1,7 @@
@@ -66,21 +66,49 @@ index 400957f4c8c9..18c65858d17b 100644
  	return 0;
  }
  
-@@ -388,6 +409,13 @@ static int zinitix_start(struct bt541_ts_data *bt541)
+@@ -378,6 +399,9 @@ static int zinitix_start(struct bt541_ts_data *bt541)
+ {
+ 	int error;
+ 
++	dev_info(&bt541->client->dev, "DACE-TS: start (open) irq=%d\n",
++		 bt541->client->irq);
++
+ 	error = regulator_bulk_enable(ARRAY_SIZE(bt541->supplies),
+ 				      bt541->supplies);
+ 	if (error) {
+@@ -388,6 +412,20 @@ static int zinitix_start(struct bt541_ts_data *bt541)
  
  	msleep(CHIP_ON_DELAY);
  
++	/* OJO con la polaridad: gpiod_set_value usa el valor LOGICO, asi que con
++	 * reset-gpios = GPIO_ACTIVE_LOW, 1 = reset ACTIVADO (linea baja) y 0 =
++	 * liberado. (En la primera version lo puse al reves y el chip se quedaba
++	 * en reset -> el open devolvia -ENOTCONN y no habia IRQ.) */
 +	if (bt541->reset_gpio) {
-+		gpiod_set_value_cansleep(bt541->reset_gpio, 0);
-+		msleep(20);
 +		gpiod_set_value_cansleep(bt541->reset_gpio, 1);
-+		msleep(120);
++		msleep(20);
++		gpiod_set_value_cansleep(bt541->reset_gpio, 0);
++		msleep(150);
++		dev_info(&bt541->client->dev, "DACE-TS: reset pulsado\n");
 +	}
++
++	dev_info(&bt541->client->dev, "DACE-TS: reguladores ON\n");
 +
  	error = zinitix_send_power_on_sequence(bt541);
  	if (error) {
  		dev_err(&bt541->client->dev,
-@@ -507,6 +535,12 @@ static int zinitix_ts_probe(struct i2c_client *client)
+@@ -402,7 +440,10 @@ static int zinitix_start(struct bt541_ts_data *bt541)
+ 		return error;
+ 	}
+ 
++	dev_info(&bt541->client->dev, "DACE-TS: chip inicializado\n");
++
+ 	enable_irq(bt541->client->irq);
++	dev_info(&bt541->client->dev, "DACE-TS: irq habilitada\n");
+ 
+ 	return 0;
+ }
+@@ -507,6 +548,12 @@ static int zinitix_ts_probe(struct i2c_client *client)
  	bt541->client = client;
  	i2c_set_clientdata(client, bt541);
  
