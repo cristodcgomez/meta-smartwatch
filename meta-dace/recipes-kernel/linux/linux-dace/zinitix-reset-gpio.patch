@@ -1,3 +1,24 @@
+From: TicWatch Pro 5 (dace) port
+Subject: [PATCH] input: touchscreen: zinitix: reset por hardware + IDs del chip
+
+El T5 lleva un Zinitix en i2c-1 @0x20 (nodo zinitix_ts@20) con
+compatible "zinitix,zinitix-ts", que el driver mainline no aceptaba (solo
+"zinitix,bt541") -> se aadio por fdtput. Con eso el driver probea, y con el
+vddo-supply (regulator_bulk_get pide vdd+vddo) y las touchscreen-size-x/y
+(touchscreen_parse_properties) llega al final del probe.
+
+Pero la IRQ nunca disparaba al tocar (contador 0 en /proc/interrupts) aunque el
+chip RESPONDE POR I2C (zinitix_start hace su secuencia de power-on sin errores):
+faltaba el RESET POR HARDWARE que el driver del vendor si hacia y el mainline no
+mira. El DT del T5 lo declara con nombre de vendor (zinitix,reset-gpio =
+<0x69 0x0c 0x00>, gpio 12 del TLMM); aqui se usa la propiedad ESTANDAR
+(reset-gpios, que se anade por fdtput) y se pulsa el reset en zinitix_start().
+
+Ademas se imprimen los IDs del chip (rev/fw/vendor/hw) al inicializar, para
+poder confirmar que es un BT541 compatible (el node declara
+zinitix,pname="SM-G5308W" y x/y_resolution=0x1d1=465, la resolucion del panel).
+
+--- 
 diff --git a/drivers/input/touchscreen/zinitix.c b/drivers/input/touchscreen/zinitix.c
 index 400957f4c8c9..18c65858d17b 100644
 --- a/drivers/input/touchscreen/zinitix.c
