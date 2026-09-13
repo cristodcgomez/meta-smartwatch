@@ -20,7 +20,7 @@ zinitix,pname="SM-G5308W" y x/y_resolution=0x1d1=465, la resolucion del panel).
 Upstream-Status: Inappropriate [dace bring-up]
 ---
 diff --git a/drivers/input/touchscreen/zinitix.c b/drivers/input/touchscreen/zinitix.c
-index 400957f4c8c9..e55a83433f08 100644
+index 400957f4c8c9..8a9f10bc6a37 100644
 --- a/drivers/input/touchscreen/zinitix.c
 +++ b/drivers/input/touchscreen/zinitix.c
 @@ -1,12 +1,17 @@
@@ -223,7 +223,7 @@ index 400957f4c8c9..e55a83433f08 100644
  	error = regulator_bulk_enable(ARRAY_SIZE(bt541->supplies),
  				      bt541->supplies);
  	if (error) {
-@@ -388,7 +530,59 @@ static int zinitix_start(struct bt541_ts_data *bt541)
+@@ -388,7 +530,63 @@ static int zinitix_start(struct bt541_ts_data *bt541)
  
  	msleep(CHIP_ON_DELAY);
  
@@ -234,11 +234,15 @@ index 400957f4c8c9..e55a83433f08 100644
 +
 +	/* pinctrl ACTIVO: configura gpio12 (reset) y gpio13 (irq, pull-up). El
 +	 * driver del vendor lo hace y el mainline no. */
++	/* dace: OJO — aplicar aqui el pinctrl 'pmx_ts_active' ROMPE el arranque
++	 * del chip (deja el reset en el estado equivocado -> -107). Se deja
++	 * DESACTIVADO: el pin ya queda configurado por el gpiod del reset.
 +	if (bt541->pins_active) {
 +		error = pinctrl_select_state(bt541->pinctrl, bt541->pins_active);
 +		dev_info(&bt541->client->dev,
 +			 "DACE-TS: pinctrl pmx_ts_active -> %d\n", error);
 +	}
++	*/
 +
 +	/* Esperar (solo la primera vez) a que el panel DSI este despierto: es lo
 +	 * que hace el driver del vendor antes de encender el chip. */
@@ -284,7 +288,7 @@ index 400957f4c8c9..e55a83433f08 100644
  	if (error) {
  		dev_err(&bt541->client->dev,
  			"Error while sending power-on sequence: %d\n", error);
-@@ -402,7 +596,17 @@ static int zinitix_start(struct bt541_ts_data *bt541)
+@@ -402,7 +600,17 @@ static int zinitix_start(struct bt541_ts_data *bt541)
  		return error;
  	}
  
@@ -302,7 +306,7 @@ index 400957f4c8c9..e55a83433f08 100644
  
  	return 0;
  }
-@@ -413,6 +617,12 @@ static int zinitix_stop(struct bt541_ts_data *bt541)
+@@ -413,6 +621,12 @@ static int zinitix_stop(struct bt541_ts_data *bt541)
  
  	disable_irq(bt541->client->irq);
  
@@ -315,7 +319,7 @@ index 400957f4c8c9..e55a83433f08 100644
  	error = regulator_bulk_disable(ARRAY_SIZE(bt541->supplies),
  				       bt541->supplies);
  	if (error) {
-@@ -507,6 +717,65 @@ static int zinitix_ts_probe(struct i2c_client *client)
+@@ -507,6 +721,65 @@ static int zinitix_ts_probe(struct i2c_client *client)
  	bt541->client = client;
  	i2c_set_clientdata(client, bt541);
  
