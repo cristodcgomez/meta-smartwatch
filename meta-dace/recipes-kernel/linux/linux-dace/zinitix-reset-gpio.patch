@@ -19,3 +19,365 @@ zinitix,pname="SM-G5308W" y x/y_resolution=0x1d1=465, la resolucion del panel).
 
 Upstream-Status: Inappropriate [dace bring-up]
 ---
+diff --git a/drivers/input/touchscreen/zinitix.c b/drivers/input/touchscreen/zinitix.c
+index 400957f4c8c9..e55a83433f08 100644
+--- a/drivers/input/touchscreen/zinitix.c
++++ b/drivers/input/touchscreen/zinitix.c
+@@ -1,12 +1,17 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ 
+ #include <linux/delay.h>
++#include <linux/gpio/consumer.h>
+ #include <linux/i2c.h>
+ #include <linux/input.h>
+ #include <linux/input/mt.h>
+ #include <linux/input/touchscreen.h>
+ #include <linux/interrupt.h>
+ #include <linux/irq.h>
++#include <linux/pinctrl/consumer.h>
++#include <linux/soc/qcom/panel_event_notifier.h>
++#include <drm/drm_panel.h>
++#include <linux/completion.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+@@ -144,8 +149,32 @@ struct bt541_ts_data {
+ 	struct i2c_client *client;
+ 	struct input_dev *input_dev;
+ 	struct touchscreen_properties prop;
+-	struct regulator_bulk_data supplies[2];
++	struct regulator_bulk_data supplies[4];
++	/* Reset por hardware: el DT del T5 declara 'zinitix,reset-gpio' (gpio 12
++	 * del TLMM) y el driver del vendor lo pulsa al arrancar. El mainline no
++	 * lo miraba: el chip respondia por i2c pero no reportaba toques (la IRQ
++	 * nunca disparaba). */
++	struct gpio_desc *reset_gpio;
++	/* pinctrl: el driver del vendor SI selecciona los estados del nodo
++	 * (pmx_ts_active/suspend/release), que configuran gpio12 (reset) y
++	 * gpio13 (irq, con bias-pull-up). El mainline no los tocaba. */
++	struct pinctrl *pinctrl;
++	struct pinctrl_state *pins_active;
++	struct pinctrl_state *pins_suspend;
++	/* panel: el driver del vendor solo enciende el chip cuando el panel DSI
++	 * esta activo (active_panel + panel_event_notifier). Se registra aqui y
++	 * se espera (una vez) al UNBLANK antes de la secuencia de power-on. */
++	struct drm_panel *panel;
++	void *panel_cookie;
++	bool panel_allow_tn;
++	bool panel_waited;
++	struct completion panel_unblank;
+ 	u32 zinitix_mode;
++	int reset_try;
++	/* dace: sondeo periodico del registro de puntos (para saber si el chip
++	 * escanea aunque la IRQ no dispare) */
++	struct delayed_work dace_poll;
++	bool dace_poll_running;
+ };
+ 
+ static int zinitix_read_data(struct i2c_client *client,
+@@ -247,9 +276,86 @@ static int zinitix_init_touch(struct bt541_ts_data *bt541)
+ 		udelay(10);
+ 	}
+ 
++	/* dace: identidad del chip (para comparar con el bt541 del driver) */
++	{
++		u16 rev = 0, fw = 0, vid = 0, hwid = 0;
++		if (!zinitix_read_data(client, BT541_CHIP_REVISION, &rev, 2) &&
++		    !zinitix_read_data(client, BT541_FIRMWARE_VERSION, &fw, 2) &&
++		    !zinitix_read_data(client, BT541_VENDOR_ID, &vid, 2) &&
++		    !zinitix_read_data(client, BT541_HW_ID, &hwid, 2))
++			dev_info(&client->dev,
++				 "DACE-TS: chip rev=%u fw=%u vendor=%u hw=%u mode=%u\n",
++				 rev, fw, vid, hwid, bt541->zinitix_mode);
++		else
++			dev_info(&client->dev,
++				 "DACE-TS: no se pudieron leer los IDs del chip\n");
++	}
++
+ 	return 0;
+ }
+ 
++/* dace bring-up: escaneo de TODOS los buses i2c para saber si el subsistema
++ * funciona y en que bus/direccion contesta algo. El chip del tactil no responde
++ * a 0x20 en i2c-1 -> -ENOTCONN (=I2C_ADDR_NACK), y el nodo del DT es
++ * boilerplate de Samsung (zinitix,pname="SM-G5308W"), asi que hay que
++ * confirmar que el tactil esta realmente en ESE bus. */
++static void zinitix_dace_i2c_scan(struct i2c_client *client)
++{
++	int nr, addr;
++
++	for (nr = 0; nr < 16; nr++) {
++		struct i2c_adapter *adap = i2c_get_adapter(nr);
++		int found = 0;
++		u8 val;
++
++		if (!adap)
++			continue;
++		for (addr = 0x08; addr < 0x78; addr++) {
++			struct i2c_msg msg = {
++				.addr = addr,
++				.flags = I2C_M_RD,
++				.len = 1,
++				.buf = &val,
++			};
++			if (i2c_transfer(adap, &msg, 1) == 1) {
++				dev_info(&client->dev,
++					 "DACE-SCAN: i2c-%d 0x%02x responde\n",
++					 nr, addr);
++				found++;
++			}
++		}
++		dev_info(&client->dev, "DACE-SCAN: i2c-%d (%s) fin, %d dev\n",
++			 nr, adap->name, found);
++		i2c_put_adapter(adap);
++	}
++}
++
++static void zinitix_panel_event_handler(enum panel_event_notifier_tag tag,
++					struct panel_event_notification *notif,
++					void *pvt_data)
++{
++	struct bt541_ts_data *bt541 = pvt_data;
++
++	if (!notif)
++		return;
++
++	dev_info(&bt541->client->dev, "DACE-TS: panel event %d\n",
++		 notif->notif_type);
++
++	switch (notif->notif_type) {
++	case DRM_PANEL_EVENT_UNBLANK:
++		bt541->panel_allow_tn = true;
++		complete(&bt541->panel_unblank);
++		break;
++	case DRM_PANEL_EVENT_BLANK:
++	case DRM_PANEL_EVENT_BLANK_LP:
++		bt541->panel_allow_tn = false;
++		break;
++	default:
++		break;
++	}
++}
++
+ static int zinitix_init_regulators(struct bt541_ts_data *bt541)
+ {
+ 	struct i2c_client *client = bt541->client;
+@@ -257,6 +363,14 @@ static int zinitix_init_regulators(struct bt541_ts_data *bt541)
+ 
+ 	bt541->supplies[0].supply = "vdd";
+ 	bt541->supplies[1].supply = "vddo";
++	/* dace: el nodo del T5 declara CUATRO rieles (vdd=0x84, vdd-v1=0x83,
++	 * vcc_i2c=0x85) y el driver del vendor los enciende todos. El mainline
++	 * solo conocia vdd+vddo y con eso el chip NO contesta a su direccion
++	 * i2c: zinitix_start -> "power-on sequence: -107" (-107 = -ENOTCONN =
++	 * I2C_ADDR_NACK, i2c-msm-geni.c:200). Se anaden los otros dos por el
++	 * nombre que ya tienen en el DT (no hace falta tocar el DT). */
++	bt541->supplies[2].supply = "vdd-v1";
++	bt541->supplies[3].supply = "vcc_i2c";
+ 	error = devm_regulator_bulk_get(&client->dev,
+ 					ARRAY_SIZE(bt541->supplies),
+ 					bt541->supplies);
+@@ -265,6 +379,10 @@ static int zinitix_init_regulators(struct bt541_ts_data *bt541)
+ 		return error;
+ 	}
+ 
++	dev_info(&client->dev, "DACE-TS: reguladores pedidos: %s+%s+%s+%s\n",
++		 bt541->supplies[0].supply, bt541->supplies[1].supply,
++		 bt541->supplies[2].supply, bt541->supplies[3].supply);
++
+ 	return 0;
+ }
+ 
+@@ -374,10 +492,34 @@ static irqreturn_t zinitix_ts_irq_handler(int irq, void *bt541_handler)
+ 	return IRQ_HANDLED;
+ }
+ 
++static void zinitix_dace_poll(struct work_struct *work)
++{
++	struct bt541_ts_data *bt541 = container_of(to_delayed_work(work),
++						   struct bt541_ts_data,
++						   dace_poll);
++	static int last;
++	struct touch_event ev;
++	int error;
++
++	error = zinitix_read_data(bt541->client, BT541_POINT_STATUS_REG,
++				  &ev, sizeof(ev));
++	if (!error && (ev.finger_mask || ev.finger_mask != last)) {
++		dev_info(&bt541->client->dev,
++			 "DACE-POLL: finger_mask=0x%02x\n", ev.finger_mask);
++		last = ev.finger_mask;
++	}
++
++	if (bt541->dace_poll_running)
++		schedule_delayed_work(&bt541->dace_poll, msecs_to_jiffies(500));
++}
++
+ static int zinitix_start(struct bt541_ts_data *bt541)
+ {
+ 	int error;
+ 
++	dev_info(&bt541->client->dev, "DACE-TS: start (open) irq=%d\n",
++		 bt541->client->irq);
++
+ 	error = regulator_bulk_enable(ARRAY_SIZE(bt541->supplies),
+ 				      bt541->supplies);
+ 	if (error) {
+@@ -388,7 +530,59 @@ static int zinitix_start(struct bt541_ts_data *bt541)
+ 
+ 	msleep(CHIP_ON_DELAY);
+ 
+-	error = zinitix_send_power_on_sequence(bt541);
++	dev_info(&bt541->client->dev, "DACE-TS: reguladores ON\n");
++
++	zinitix_dace_i2c_scan(bt541->client);
++
++	/* pinctrl ACTIVO: configura gpio12 (reset) y gpio13 (irq, pull-up). El
++	 * driver del vendor lo hace y el mainline no. */
++	if (bt541->pins_active) {
++		error = pinctrl_select_state(bt541->pinctrl, bt541->pins_active);
++		dev_info(&bt541->client->dev,
++			 "DACE-TS: pinctrl pmx_ts_active -> %d\n", error);
++	}
++
++	/* Esperar (solo la primera vez) a que el panel DSI este despierto: es lo
++	 * que hace el driver del vendor antes de encender el chip. */
++	if (bt541->panel_cookie && !bt541->panel_allow_tn && !bt541->panel_waited) {
++		bt541->panel_waited = true;
++		if (!wait_for_completion_timeout(&bt541->panel_unblank,
++						 msecs_to_jiffies(1500)))
++			dev_info(&bt541->client->dev,
++				 "DACE-TS: sin UNBLANK del panel en 1.5s, sigo\n");
++		else
++			dev_info(&bt541->client->dev,
++				 "DACE-TS: panel UNBLANK recibido\n");
++	}
++
++	/* Reset + power-on con AUTODETECCION de polaridad: el DT del T5 trae el
++	 * flag del vendor (<&tlmm 0x0c 0>), que no sabemos a que nivel fisico
++	 * corresponde. Se prueban las DOS (logica 1->0 y 0->1) y se deja la que
++	 * haga que el chip conteste (en la que funcione no hay -ENOTCONN). */
++	for (bt541->reset_try = 0; bt541->reset_try < 2; bt541->reset_try++) {
++		if (bt541->reset_gpio) {
++			gpiod_set_value_cansleep(bt541->reset_gpio,
++						 bt541->reset_try ? 0 : 1);
++			msleep(20);
++			gpiod_set_value_cansleep(bt541->reset_gpio,
++						 bt541->reset_try ? 1 : 0);
++			msleep(150);
++			dev_info(&bt541->client->dev,
++				 "DACE-TS: reset pulsado (polaridad %d)\n",
++				 bt541->reset_try);
++		}
++
++		error = zinitix_send_power_on_sequence(bt541);
++		if (!error) {
++			dev_info(&bt541->client->dev,
++				 "DACE-TS: power-on OK con polaridad %d\n",
++				 bt541->reset_try);
++			break;
++		}
++		dev_info(&bt541->client->dev,
++			 "DACE-TS: power-on fallo con polaridad %d (%d)\n",
++			 bt541->reset_try, error);
++	}
+ 	if (error) {
+ 		dev_err(&bt541->client->dev,
+ 			"Error while sending power-on sequence: %d\n", error);
+@@ -402,7 +596,17 @@ static int zinitix_start(struct bt541_ts_data *bt541)
+ 		return error;
+ 	}
+ 
++	dev_info(&bt541->client->dev, "DACE-TS: chip inicializado\n");
++
+ 	enable_irq(bt541->client->irq);
++	dev_info(&bt541->client->dev, "DACE-TS: irq habilitada\n");
++
++	if (!bt541->dace_poll_running) {
++		bt541->dace_poll_running = true;
++		schedule_delayed_work(&bt541->dace_poll,
++				      msecs_to_jiffies(500));
++		dev_info(&bt541->client->dev, "DACE-TS: sondeo i2c activado\n");
++	}
+ 
+ 	return 0;
+ }
+@@ -413,6 +617,12 @@ static int zinitix_stop(struct bt541_ts_data *bt541)
+ 
+ 	disable_irq(bt541->client->irq);
+ 
++	bt541->dace_poll_running = false;
++	cancel_delayed_work_sync(&bt541->dace_poll);
++
++	if (bt541->pins_suspend)
++		pinctrl_select_state(bt541->pinctrl, bt541->pins_suspend);
++
+ 	error = regulator_bulk_disable(ARRAY_SIZE(bt541->supplies),
+ 				       bt541->supplies);
+ 	if (error) {
+@@ -507,6 +717,65 @@ static int zinitix_ts_probe(struct i2c_client *client)
+ 	bt541->client = client;
+ 	i2c_set_clientdata(client, bt541);
+ 
++	bt541->reset_gpio = devm_gpiod_get_optional(&client->dev, "reset",
++						    GPIOD_OUT_HIGH);
++	if (IS_ERR(bt541->reset_gpio))
++		return dev_err_probe(&client->dev, PTR_ERR(bt541->reset_gpio),
++				     "Failed to get reset GPIO\n");
++
++	/* pinctrl del nodo (pmx_ts_active/suspend): como el driver del vendor. */
++	bt541->pinctrl = devm_pinctrl_get(&client->dev);
++	if (IS_ERR(bt541->pinctrl)) {
++		dev_info(&client->dev, "DACE-TS: sin pinctrl (%ld)\n",
++			 PTR_ERR(bt541->pinctrl));
++		bt541->pinctrl = NULL;
++	} else {
++		bt541->pins_active = pinctrl_lookup_state(bt541->pinctrl,
++							  "pmx_ts_active");
++		if (IS_ERR(bt541->pins_active))
++			bt541->pins_active = NULL;
++		bt541->pins_suspend = pinctrl_lookup_state(bt541->pinctrl,
++							   "pmx_ts_suspend");
++		if (IS_ERR(bt541->pins_suspend))
++			bt541->pins_suspend = NULL;
++		dev_info(&client->dev,
++			 "DACE-TS: pinctrl active=%d suspend=%d\n",
++			 !!bt541->pins_active, !!bt541->pins_suspend);
++	}
++
++	/* Enlace con el panel DSI (propiedad 'panel' del nodo) + notifier: el
++	 * driver del vendor espera a que el panel este activo antes de encender
++	 * el chip ("active panel selected !"). */
++	init_completion(&bt541->panel_unblank);
++	{
++		struct device_node *np = of_parse_phandle(client->dev.of_node,
++							  "panel", 0);
++		struct drm_panel *panel = np ? of_drm_find_panel(np) : NULL;
++		if (np)
++			of_node_put(np);
++		if (!IS_ERR_OR_NULL(panel)) {
++			bt541->panel = panel;
++			bt541->panel_cookie = panel_event_notifier_register(
++				PANEL_EVENT_NOTIFICATION_PRIMARY,
++				PANEL_EVENT_NOTIFIER_CLIENT_ECM, panel,
++				zinitix_panel_event_handler, bt541);
++			if (IS_ERR(bt541->panel_cookie)) {
++				dev_info(&client->dev,
++					 "DACE-TS: panel_notifier no disponible (%ld)\n",
++					 PTR_ERR(bt541->panel_cookie));
++				bt541->panel_cookie = NULL;
++			} else {
++				dev_info(&client->dev,
++					 "DACE-TS: registrado en panel_event_notifier\n");
++			}
++		} else {
++			dev_info(&client->dev,
++				 "DACE-TS: sin panel (propiedad 'panel' o of_drm_find_panel)\n");
++		}
++	}
++
++	INIT_DELAYED_WORK(&bt541->dace_poll, zinitix_dace_poll);
++
+ 	error = zinitix_init_regulators(bt541);
+ 	if (error) {
+ 		dev_err(&client->dev,
