@@ -3,22 +3,24 @@ Subject: [PATCH] input: raydium_i2c_ts: autodeteccion de la polaridad del reset
 
 El driver mainline termina su power_on dejando el reset en el nivel LOGICO 0
 (gpiod_set_value_cansleep(ts->reset_gpio, 0)). En el DT del T5 el reset-gpios
-lleva el flag del overlay stock (<&tlmm 0x0c 0x00>, o sea ACTIVE_HIGH), con lo
-que "0" = nivel FISICO BAJO. Si el reset del chip es activo-bajo (lo habitual),
+lleva el flag del overlay stock (<&tlmm 0x0c 0x00>, ACTIVE_HIGH), con lo que
+ese 0 es nivel FISICO BAJO. Si el reset del chip es activo-bajo (lo habitual),
 el driver lo deja ASERTADO justo antes de comprobar la direccion i2c ->
-"nothing at this address" y el tactil no arranca.
+"nothing at this address" y el tactil no arranca (medido en el reloj).
 
-No sabemos cual es la polaridad fisica real (el flag 0x00 del vendor puede ser
-solo convencion de su driver, que usa gpio_set_value crudo), asi que aqui se
-prueban LAS DOS: si la comprobacion de direccion falla, se hace un pulso de
-reset invertido y se reintenta. Se registra cual funciona (para poder fijar el
-flag correcto en el DT y quitar este parche).
+El flag 0x00 del vendor puede ser solo convencion de SU driver (que usa
+gpio_set_value crudo), asi que aqui se prueban LAS DOS polaridades: si la
+comprobacion de direccion falla se hace un pulso de reset invertido y se
+reintenta, registrando cual funciona (DACE-RAY) para poder fijar el flag
+correcto en el DT y quitar este parche.
 
 Upstream-Status: Inappropriate [dace bring-up]
 ---
---- a/drivers/input/touchscreen/raydium_i2c_ts.c	2024-01-01 00:00:00.000000000 +0000
-+++ b/drivers/input/touchscreen/raydium_i2c_ts.c	2024-01-01 00:00:00.000000000 +0000
-@@ -1094,7 +1094,36 @@
+diff --git a/drivers/input/touchscreen/raydium_i2c_ts.c b/drivers/input/touchscreen/raydium_i2c_ts.c
+index bdb3e2c3ab79..5ef7f1fe2083 100644
+--- a/drivers/input/touchscreen/raydium_i2c_ts.c
++++ b/drivers/input/touchscreen/raydium_i2c_ts.c
+@@ -1095,8 +1095,30 @@ static int raydium_i2c_probe(struct i2c_client *client,
  	/* Make sure there is something at this address */
  	if (i2c_smbus_xfer(client->adapter, client->addr, 0,
  			   I2C_SMBUS_READ, 0, I2C_SMBUS_BYTE, &dummy) < 0) {
@@ -29,8 +31,11 @@ Upstream-Status: Inappropriate [dace bring-up]
 +			return -ENXIO;
 +		}
 +
-+		/* dace bring-up: reintentar con la polaridad del reset invertida
-+		 * (el flag del DT puede no corresponder al nivel fisico real). */
++		/* dace bring-up: el driver termina el power_on con el reset en el
++		 * nivel LOGICO 0, que segun el flag del DT puede ser el nivel
++		 * fisico que deja el chip ASERTADO. En vez de adivinar el flag,
++		 * se reintenta con la polaridad invertida y se registra cual
++		 * funciona (luego se fija el flag en el DT y se quita esto). */
 +		dev_info(&client->dev,
 +			 "DACE-RAY: no responde; reintento con la polaridad inversa del reset\n");
 +		gpiod_set_value_cansleep(ts->reset_gpio, 0);
@@ -44,5 +49,7 @@ Upstream-Status: Inappropriate [dace bring-up]
 +			return -ENXIO;
 +		}
 +		dev_info(&client->dev,
-+			 "DACE-RAY: responde con la polaridad INVERSA del reset (revisar el flag de reset-gpios en el DT)\n");
++			 "DACE-RAY: RESPONDE con la polaridad INVERSA del reset\n");
  	}
+ 
+ 	error = raydium_i2c_initialize(ts);
