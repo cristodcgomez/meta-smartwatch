@@ -32,11 +32,11 @@ done
 # táctil presente desde el arranque, el composer-service de Qualcomm muere con
 # SIGSEGV ~0.2 s despues de crear /dev/socket/pps y la UI se queda sin composer
 # (el stack de display reacciona al panel/táctil). Se deja para el final.
-modprobe raydium_i2c_ts 2>/dev/null && echo "dace-lxc-hal-start: tactil Raydium RM32380 cargado" \
-    || echo "dace-lxc-hal-start: aviso, no se pudo cargar raydium_i2c_ts"
+modprobe zinitix 2>/dev/null && echo "dace-lxc-hal-start: tactil Zinitix cargado" \
+    || echo "dace-lxc-hal-start: aviso, no se pudo cargar zinitix"
 sleep 3
-grep -q "Raydium" /proc/bus/input/devices 2>/dev/null && echo "dace-hal: táctil Raydium PRESENTE" \
-    || echo "dace-hal: táctil Raydium AUSENTE (revisar dmesg: raydium/rgpio)
+grep -qE "Zinitix|Raydium" /proc/bus/input/devices 2>/dev/null && echo "dace-hal: táctil PRESENTE" \
+    || echo "dace-hal: táctil AUSENTE"
 
 # Comprobacion: que el servicio responda (el cliente lo pide por el bus)
 sleep 5

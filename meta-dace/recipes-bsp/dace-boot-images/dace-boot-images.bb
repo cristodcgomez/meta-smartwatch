@@ -31,6 +31,7 @@ SRC_URI = "\
     file://static/bootconfig \
     file://static/monaco-real.dtb \
     file://static/monacop.dtb \
+    file://static/monaco-idp-v1-overlay.dtbo \
     file://static/stock/qti-qbg-main.ko \
 "
 S = "${UNPACKDIR}"
@@ -167,6 +168,8 @@ do_compile() {
     FDTPUT=$(find ${STAGING_BINDIR_NATIVE} -name fdtput 2>/dev/null | head -1)
     [ -n "$FDTPUT" ] || FDTPUT=$(command -v fdtput)
     test -n "$FDTPUT" || bbfatal "fdtput no encontrado (dtc-native)"
+    FDTOVERLAY="${STAGING_BINDIR_NATIVE}/fdtoverlay"
+    test -n "$FDTOVERLAY" || bbfatal "fdtoverlay no encontrado (dtc-native)"
     for dtb in monaco-real monacop; do
         cp ${S}/static/${dtb}.dtb ${WORKDIR}/${dtb}-per.dtb
         # ruta del hijo dwc3: /soc/hsusb@4e00000/dwc3@4e00000 (del dts)
@@ -231,34 +234,23 @@ do_compile() {
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb \
             /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
             reset-gpios 0x69 0x0c 0x1
-        # ── TÁCTIL REAL DEL T5: RAYDIUM RM32380 en i2c-1 @0x39 ──────────────
-        # El nodo zinitix_ts@20 de arriba es BOILERPLATE de Samsung
-        # (zinitix,pname="SM-G5308W"): no hay chip Zinitix en el T5. El táctil
-        # real es un Raydium y su nodo (con sus rieles y GPIOs) vive SOLO en el
-        # overlay stock del dtbo (board-id 0x10024), que el ABL NO aplica
-        # porque el board-id de este reloj es distinto -> sin nodo, los rieles
-        # del táctil no se encienden y el chip no contesta a i2c (medido: el
-        # escáner del bus da 0 dispositivos en i2c-1, mientras que en i2c-2 el
-        # NFC SÍ responde -> el subsistema i2c funciona).
-        # Datos del nodo tomados del overlay stock (fragment@13 de ovl09):
-        #   reg=0x39 · vdd_ana=L29A · vcc_i2c=L21A · reset=gpio12 · irq=gpio13
-        # El driver MAINLINE (raydium_i2c_ts.c, CONFIG_TOUCHSCREEN_RM_TS) sólo
-        # acepta "raydium,rm32380" y usa los nombres ESTÁNDAR avdd/vccio/reset.
-        TS=/soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/raydium_ts@39
-        "$FDTPUT" -c -p ${WORKDIR}/${dtb}-per.dtb "$TS"
-        "$FDTPUT" -p -t s ${WORKDIR}/${dtb}-per.dtb "$TS" compatible "raydium,rm32380"
-        "$FDTPUT" -p -t x ${WORKDIR}/${dtb}-per.dtb "$TS" reg 0x39
-        "$FDTPUT" -p -t s ${WORKDIR}/${dtb}-per.dtb "$TS" status ok
-        "$FDTPUT" -p -t x ${WORKDIR}/${dtb}-per.dtb "$TS" interrupt-parent 0x69
-        "$FDTPUT" -p -t x ${WORKDIR}/${dtb}-per.dtb "$TS" interrupts 0x0d 0x2008
-        "$FDTPUT" -p -t x ${WORKDIR}/${dtb}-per.dtb "$TS" avdd-supply 0x83
-        "$FDTPUT" -p -t x ${WORKDIR}/${dtb}-per.dtb "$TS" vccio-supply 0x85
-        "$FDTPUT" -p -t x ${WORKDIR}/${dtb}-per.dtb "$TS" reset-gpios 0x69 0x0c 0x00
-        # y el zinitix (boilerplate, sin chip) fuera: si no, queda un i2c client
-        # fantasma en 0x20 que falla en bucle al abrir el device
-        "$FDTPUT" -p -t s ${WORKDIR}/${dtb}-per.dtb \
-            /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
-            status disabled
+        # ── OVERLAY DE NUESTRA VARIANTE (Monaco IDP V1.0, board 0x10022) ────
+        # Cada variante del SoC tiene su overlay en el dtbo (WDP -> Raydium,
+        # IDP -> Zinitix...). El ABL los aplica por board-id, pero el del
+        # reloj (0x10022) NO se aplica (se comprobo en vivo: el nodo del
+        # tactil no recibe la propiedad 'panel' que anade el overlay). Aqui se
+        # aplica a mano con fdtoverlay: el de IDP V1.0 anade al zinitix_ts@20
+        # el enlace con el panel (panel = <&dsi_rm69090_amoled_cmd>), que es
+        # lo que el driver del vendor usa para encender el chip.
+        if [ -f ${UNPACKDIR}/monaco-idp-v1-overlay.dtbo ]; then
+            ${FDTOVERLAY} -i ${WORKDIR}/${dtb}-per.dtb \
+                -o ${WORKDIR}/${dtb}-ovl.dtb \
+                ${UNPACKDIR}/monaco-idp-v1-overlay.dtbo \
+                && mv ${WORKDIR}/${dtb}-ovl.dtb ${WORKDIR}/${dtb}-per.dtb \
+                && bbnote "$dtb: overlay Monaco IDP V1.0 (board 0x10022) aplicado"
+        else
+            bbwarn "$dtb: falta monaco-idp-v1-overlay.dtbo"
+        fi
         bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, sin OPP) + RAYDIUM rm32380 @0x39 (i2c-1) + zinitix disabled"
     done
     cat ${WORKDIR}/monaco-real-per.dtb ${WORKDIR}/monacop-per.dtb > ${WORKDIR}/dtb-blob-vendor.bin
