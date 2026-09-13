@@ -1,55 +1,93 @@
 From: TicWatch Pro 5 (dace) port
-Subject: [PATCH] input: raydium_i2c_ts: autodeteccion de la polaridad del reset
+Subject: [PATCH] input: raydium_i2c_ts: alimentar SIEMPRE + autodetectar polaridad del reset
 
-El driver mainline termina su power_on dejando el reset en el nivel LOGICO 0
-(gpiod_set_value_cansleep(ts->reset_gpio, 0)). En el DT del T5 el reset-gpios
-lleva el flag del overlay stock (<&tlmm 0x0c 0x00>, ACTIVE_HIGH), con lo que
-ese 0 es nivel FISICO BAJO. Si el reset del chip es activo-bajo (lo habitual),
-el driver lo deja ASERTADO justo antes de comprobar la direccion i2c ->
-"nothing at this address" y el tactil no arranca (medido en el reloj).
+Dos cosas para el T5 (Raydium RM32380 en i2c-1 @0x39):
 
-El flag 0x00 del vendor puede ser solo convencion de SU driver (que usa
-gpio_set_value crudo), asi que aqui se prueban LAS DOS polaridades: si la
-comprobacion de direccion falla se hace un pulso de reset invertido y se
-reintenta, registrando cual funciona (DACE-RAY) para poder fijar el flag
-correcto en el DT y quitar este parche.
+1) El upstream sale de raydium_i2c_power_on() sin encender los reguladores si
+   el nodo no trae GPIO de reset ("if (!ts->reset_gpio) return 0"), dando por
+   hecho que los rieles ya estan encendidos. En el T5 el riel analogico
+   (L29A/vdd_ana, 2.8V) NO lo usa nadie mas -> se queda apagado y el chip no
+   contesta a i2c ("nothing at this address"). Aqui se encienden SIEMPRE.
+
+2) El driver termina el power_on dejando el reset en el nivel LOGICO 0; segun
+   el flag del DT eso puede ser el nivel fisico que deja el chip ASERTADO. En
+   vez de adivinar el flag se prueban LAS DOS polaridades y se registra cual
+   funciona (DACE-RAY) para fijar luego el flag en el DT.
 
 Upstream-Status: Inappropriate [dace bring-up]
 ---
 diff --git a/drivers/input/touchscreen/raydium_i2c_ts.c b/drivers/input/touchscreen/raydium_i2c_ts.c
-index bdb3e2c3ab79..5ef7f1fe2083 100644
+index bdb3e2c3ab79..fb6d2ffb729c 100644
 --- a/drivers/input/touchscreen/raydium_i2c_ts.c
 +++ b/drivers/input/touchscreen/raydium_i2c_ts.c
-@@ -1095,8 +1095,30 @@ static int raydium_i2c_probe(struct i2c_client *client,
- 	/* Make sure there is something at this address */
- 	if (i2c_smbus_xfer(client->adapter, client->addr, 0,
- 			   I2C_SMBUS_READ, 0, I2C_SMBUS_BYTE, &dummy) < 0) {
--		dev_err(&client->dev, "nothing at this address\n");
--		return -ENXIO;
-+		if (!ts->reset_gpio) {
-+			dev_err(&client->dev, "nothing at this address\n");
-+			return -ENXIO;
-+		}
+@@ -986,12 +986,19 @@ static int raydium_i2c_power_on(struct raydium_data *ts)
+ {
+ 	int error;
+ 
+-	if (!ts->reset_gpio)
+-		return 0;
+-
+-	gpiod_set_value_cansleep(ts->reset_gpio, 1);
++	/* dace: el upstream SALE sin encender los reguladores si no hay GPIO de
++	 * reset ("if (!ts->reset_gpio) return 0"), dando por hecho que los
++	 * rieles ya estan encendidos. Aqui se encienden SIEMPRE: en el T5 el
++	 * riel analogico (L29A, 2.8V) no lo usa nadie mas, asi que sin esto el
++	 * chip queda SIN ALIMENTAR y no contesta a i2c. */
++	dev_info(&ts->client->dev, "DACE-RAY: power_on (reset_gpio=%s)\n",
++		 ts->reset_gpio ? "si" : "NO");
 +
-+		/* dace bring-up: el driver termina el power_on con el reset en el
-+		 * nivel LOGICO 0, que segun el flag del DT puede ser el nivel
-+		 * fisico que deja el chip ASERTADO. En vez de adivinar el flag,
-+		 * se reintenta con la polaridad invertida y se registra cual
-+		 * funciona (luego se fija el flag en el DT y se quita esto). */
-+		dev_info(&client->dev,
-+			 "DACE-RAY: no responde; reintento con la polaridad inversa del reset\n");
-+		gpiod_set_value_cansleep(ts->reset_gpio, 0);
-+		msleep(20);
++	if (ts->reset_gpio)
 +		gpiod_set_value_cansleep(ts->reset_gpio, 1);
-+		msleep(150);
-+
-+		if (i2c_smbus_xfer(client->adapter, client->addr, 0,
-+				   I2C_SMBUS_READ, 0, I2C_SMBUS_BYTE, &dummy) < 0) {
-+			dev_err(&client->dev, "nothing at this address\n");
-+			return -ENXIO;
-+		}
-+		dev_info(&client->dev,
-+			 "DACE-RAY: RESPONDE con la polaridad INVERSA del reset\n");
+ 
+ 	error = regulator_enable(ts->avdd);
++	dev_info(&ts->client->dev, "DACE-RAY: avdd enable -> %d\n", error);
+ 	if (error) {
+ 		dev_err(&ts->client->dev,
+ 			"failed to enable avdd regulator: %d\n", error);
+@@ -999,6 +1006,7 @@ static int raydium_i2c_power_on(struct raydium_data *ts)
  	}
  
- 	error = raydium_i2c_initialize(ts);
+ 	error = regulator_enable(ts->vccio);
++	dev_info(&ts->client->dev, "DACE-RAY: vccio enable -> %d\n", error);
+ 	if (error) {
+ 		regulator_disable(ts->avdd);
+ 		dev_err(&ts->client->dev,
+@@ -1009,7 +1017,8 @@ static int raydium_i2c_power_on(struct raydium_data *ts)
+ 	udelay(RM_POWERON_DELAY_USEC);
+ 
+ release_reset_gpio:
+-	gpiod_set_value_cansleep(ts->reset_gpio, 0);
++	if (ts->reset_gpio)
++		gpiod_set_value_cansleep(ts->reset_gpio, 0);
+ 
+ 	if (error)
+ 		return error;
+@@ -1023,11 +1032,12 @@ static void raydium_i2c_power_off(void *_data)
+ {
+ 	struct raydium_data *ts = _data;
+ 
+-	if (ts->reset_gpio) {
++	/* dace: los reguladores se encienden siempre en power_on, asi que se
++	 * apagan siempre aqui (el gpio de reset es opcional). */
++	if (ts->reset_gpio)
+ 		gpiod_set_value_cansleep(ts->reset_gpio, 1);
+-		regulator_disable(ts->vccio);
+-		regulator_disable(ts->avdd);
+-	}
++	regulator_disable(ts->vccio);
++	regulator_disable(ts->avdd);
+ }
+ 
+ static int raydium_i2c_probe(struct i2c_client *client,
+@@ -1080,6 +1090,11 @@ static int raydium_i2c_probe(struct i2c_client *client,
+ 		return error;
+ 	}
+ 
++	dev_info(&client->dev,
++		 "DACE-RAY: probe avdd=%s vccio=%s reset_gpio=%s irq=%d\n",
++		 ts->avdd ? "si" : "no", ts->vccio ? "si" : "no",
++		 ts->reset_gpio ? "si" : "NO", client->irq);
++
+ 	error = raydium_i2c_power_on(ts);
+ 	if (error)
+ 		return error;
