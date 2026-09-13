@@ -33,7 +33,7 @@ new file mode 100644
 index 000000000..98370fd73
 --- /dev/null
 +++ b/kernel/dace_stubs.c
-@@ -0,0 +1,29 @@
+@@ -0,0 +1,42 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * dace_stubs.c — símbolos que los módulos vendor stock (Mobvoi msm-5.15)
@@ -63,3 +63,16 @@ index 000000000..98370fd73
 +	panic("CFI failure (target: %pS)\n", ptr);
 +}
 +EXPORT_SYMBOL(__ubsan_handle_cfi_check_fail_abort);
++
++/*
++ * Stack protector: los .ko stock de Mobvai se compilaron con
++ * STACKPROTECTOR_STRONG y llaman a __stack_chk_fail. El fragmento sw5100
++ * pide CONFIG_STACKPROTECTOR=y pero el Kconfig lo descarta (dependencia no
++ * cumplida con esta configuracion), asi que se provee aqui. Solo se ejecuta
++ * si el canary se corrompe -> panic, igual que el propio kernel.
++ */
++void __stack_chk_fail(void)
++{
++	panic("stack-protector: Kernel stack is corrupted\n");
++}
++EXPORT_SYMBOL(__stack_chk_fail);
