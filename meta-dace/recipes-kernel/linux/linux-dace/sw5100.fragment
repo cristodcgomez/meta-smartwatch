@@ -74,17 +74,28 @@ CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,integrity,apparmor,selinux,
 # CONFIG_QCOM_POWER_SUPPLY is not set
 # CONFIG_QPNP_SMBLITE is not set
 # CONFIG_QTI_QBG is not set
-# CONFIG_MSM_SEB is not set
-# CONFIG_MSM_SEB_RPMSG is not set
-# CONFIG_MSM_SLATECOM is not set
-# CONFIG_MSM_SLATECOM_EVENT is not set
-# CONFIG_MSM_SLATECOM_INTERFACE is not set
-# CONFIG_MSM_SLATECOM_RPMSG is not set
-# CONFIG_MSM_SLATERSB is not set
-# CONFIG_MSM_SLATERSB_RPMSG is not set
-# CONFIG_QCOM_RPROC_SLATE is not set
+# ─── SLATE (coprocesador de Mobvoi) ─────────────────────────────────────────
+# Estaban desactivados del bring-up. Se activan como MODULOS (=m) porque el
+# overlay de NUESTRA variante (Monaco IDP V1.0) crea sus nodos DT
+# (slate-spi, slate-daemon, slatecom-rpmsg, slate-events-bridge, slate-rsb,
+# slate-mobvoirpc, slatetouch-rpmsg) y porque:
+#   * el driver del tactil del VENDOR depende de slate_mobvoi_rpc y
+#     slate_events_bridge (y el canal 'slatetouch-rpmsg' existe en el DT),
+#   * MSM_SEB dice literalmente que recibe los EVENTOS DE BOTONES del slate
+#     (el boton/rueda que no funciona),
+# asi que es muy probable que el slate alimente/habilite el tactil y gestione
+# las teclas. =m (no =y) para poder cargarlos a mano y ver el efecto.
+CONFIG_MSM_SEB=m
+CONFIG_MSM_SEB_RPMSG=m
+CONFIG_MSM_SLATECOM=m
+CONFIG_MSM_SLATECOM_EVENT=m
+CONFIG_MSM_SLATECOM_INTERFACE=m
+CONFIG_MSM_SLATECOM_RPMSG=m
+CONFIG_MSM_SLATERSB=m
+CONFIG_MSM_SLATERSB_RPMSG=m
+CONFIG_QCOM_RPROC_SLATE=m
 
-# CONFIG_RPMSG_QCOM_GLINK_SLATECOM is not set
+CONFIG_RPMSG_QCOM_GLINK_SLATECOM=m
 
 # Boot splash (psplash) via the bootloader continuous-splash buffer.
 #
