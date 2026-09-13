@@ -1,0 +1,48 @@
+From: TicWatch Pro 5 (dace) port
+Subject: [PATCH] input: raydium_i2c_ts: autodeteccion de la polaridad del reset
+
+El driver mainline termina su power_on dejando el reset en el nivel LOGICO 0
+(gpiod_set_value_cansleep(ts->reset_gpio, 0)). En el DT del T5 el reset-gpios
+lleva el flag del overlay stock (<&tlmm 0x0c 0x00>, o sea ACTIVE_HIGH), con lo
+que "0" = nivel FISICO BAJO. Si el reset del chip es activo-bajo (lo habitual),
+el driver lo deja ASERTADO justo antes de comprobar la direccion i2c ->
+"nothing at this address" y el tactil no arranca.
+
+No sabemos cual es la polaridad fisica real (el flag 0x00 del vendor puede ser
+solo convencion de su driver, que usa gpio_set_value crudo), asi que aqui se
+prueban LAS DOS: si la comprobacion de direccion falla, se hace un pulso de
+reset invertido y se reintenta. Se registra cual funciona (para poder fijar el
+flag correcto en el DT y quitar este parche).
+
+Upstream-Status: Inappropriate [dace bring-up]
+---
+--- a/drivers/input/touchscreen/raydium_i2c_ts.c	2024-01-01 00:00:00.000000000 +0000
++++ b/drivers/input/touchscreen/raydium_i2c_ts.c	2024-01-01 00:00:00.000000000 +0000
+@@ -1094,7 +1094,36 @@
+ 	/* Make sure there is something at this address */
+ 	if (i2c_smbus_xfer(client->adapter, client->addr, 0,
+ 			   I2C_SMBUS_READ, 0, I2C_SMBUS_BYTE, &dummy) < 0) {
+-		dev_err(&client->dev, "nothing at this address\n");
+-		return -ENXIO;
++		if (!ts->reset_gpio) {
++			dev_err(&client->dev, "nothing at this address\n");
++			return -ENXIO;
++		}
++
++		/* dace bring-up: reintentar con la polaridad del reset invertida
++		 * (el flag del DT puede no corresponder al nivel fisico real). */
++		dev_info(&client->dev,
++			 "DACE-RAY: no responde; reintento con la polaridad inversa del reset\n");
++		gpiod_set_value_cansleep(ts->reset_gpio, 0);
++		msleep(20);
++		gpiod_set_value_cansleep(ts->reset_gpio, 1);
++		msleep(150);
++
++		if (i2c_smbus_xfer(client->adapter, client->addr, 0,
++				   I2C_SMBUS_READ, 0, I2C_SMBUS_BYTE, &dummy) < 0) {
++			dev_err(&client->dev, "nothing at this address\n");
++			return -ENXIO;
++		}
++		dev_info(&client->dev,
++			 "DACE-RAY: responde con la polaridad INVERSA del reset (revisar el flag de reset-gpios en el DT)\n");
+ 	}

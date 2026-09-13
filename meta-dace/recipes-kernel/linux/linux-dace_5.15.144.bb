@@ -23,6 +23,7 @@ SRC_URI = "git://gitlab.com/ubports/porting/community-ports/android13/google-eos
            file://opp-icc-tolerant.patch \
            file://arm-smmu-skip-init.patch \
            file://zinitix-reset-gpio.patch \
+           file://raydium-dace-polarity.patch \
            file://icc-rpm-novote.patch \
            file://phy-msm-snps-hs-trace.patch \
            file://rtc-pm8xxx-read-only.patch \
