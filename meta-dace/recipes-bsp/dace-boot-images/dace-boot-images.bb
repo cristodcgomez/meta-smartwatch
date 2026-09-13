@@ -231,7 +231,35 @@ do_compile() {
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb \
             /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
             reset-gpios 0x69 0x0c 0x1
-        bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, sin OPP) + tactil zinitix bt541 (3 rieles: vdd+vddo->vcc_i2c+vdd-v1)"
+        # ── TÁCTIL REAL DEL T5: RAYDIUM RM32380 en i2c-1 @0x39 ──────────────
+        # El nodo zinitix_ts@20 de arriba es BOILERPLATE de Samsung
+        # (zinitix,pname="SM-G5308W"): no hay chip Zinitix en el T5. El táctil
+        # real es un Raydium y su nodo (con sus rieles y GPIOs) vive SOLO en el
+        # overlay stock del dtbo (board-id 0x10024), que el ABL NO aplica
+        # porque el board-id de este reloj es distinto -> sin nodo, los rieles
+        # del táctil no se encienden y el chip no contesta a i2c (medido: el
+        # escáner del bus da 0 dispositivos en i2c-1, mientras que en i2c-2 el
+        # NFC SÍ responde -> el subsistema i2c funciona).
+        # Datos del nodo tomados del overlay stock (fragment@13 de ovl09):
+        #   reg=0x39 · vdd_ana=L29A · vcc_i2c=L21A · reset=gpio12 · irq=gpio13
+        # El driver MAINLINE (raydium_i2c_ts.c, CONFIG_TOUCHSCREEN_RM_TS) sólo
+        # acepta "raydium,rm32380" y usa los nombres ESTÁNDAR avdd/vccio/reset.
+        TS=/soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/raydium_ts@39
+        "$FDTPUT" -c -p ${WORKDIR}/${dtb}-per.dtb "$TS"
+        "$FDTPUT" -p -t s ${WORKDIR}/${dtb}-per.dtb "$TS" compatible "raydium,rm32380"
+        "$FDTPUT" -p -t x ${WORKDIR}/${dtb}-per.dtb "$TS" reg 0x39
+        "$FDTPUT" -p -t s ${WORKDIR}/${dtb}-per.dtb "$TS" status ok
+        "$FDTPUT" -p -t x ${WORKDIR}/${dtb}-per.dtb "$TS" interrupt-parent 0x69
+        "$FDTPUT" -p -t x ${WORKDIR}/${dtb}-per.dtb "$TS" interrupts 0x0d 0x2008
+        "$FDTPUT" -p -t x ${WORKDIR}/${dtb}-per.dtb "$TS" avdd-supply 0x83
+        "$FDTPUT" -p -t x ${WORKDIR}/${dtb}-per.dtb "$TS" vccio-supply 0x85
+        "$FDTPUT" -p -t x ${WORKDIR}/${dtb}-per.dtb "$TS" reset-gpios 0x69 0x0c 0x00
+        # y el zinitix (boilerplate, sin chip) fuera: si no, queda un i2c client
+        # fantasma en 0x20 que falla en bucle al abrir el device
+        "$FDTPUT" -p -t s ${WORKDIR}/${dtb}-per.dtb \
+            /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
+            status disabled
+        bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, sin OPP) + RAYDIUM rm32380 @0x39 (i2c-1) + zinitix disabled"
     done
     cat ${WORKDIR}/monaco-real-per.dtb ${WORKDIR}/monacop-per.dtb > ${WORKDIR}/dtb-blob-vendor.bin
     bbnote "DTB blob vendor_boot: $(stat -c%s ${WORKDIR}/dtb-blob-vendor.bin) bytes (stock=572016)"

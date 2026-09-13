@@ -28,16 +28,15 @@ for svc in vendor.qti.hardware.display.allocator vendor.qti.hardware.display.com
     sleep 2
 done
 
-# TACTIL: cargar el driver Zinitix AHORA (no antes). Con el driver presente
-# desde el arranque, el composer-service de Qualcomm muere con SIGSEGV ~0.2 s
-# despues de crear /dev/socket/pps y la UI se queda sin composer. El nodo del
-# táctil esta enlazado al panel (propiedad 'panel') y el stack de display
-# reacciona a él, asi que se deja para el final.
-modprobe zinitix 2>/dev/null && echo "dace-lxc-hal-start: tactil zinitix cargado" \
-    || echo "dace-lxc-hal-start: aviso, no se pudo cargar zinitix"
+# TACTIL: cargar el driver del RAYDIUM AHORA (no antes). Con un driver de
+# táctil presente desde el arranque, el composer-service de Qualcomm muere con
+# SIGSEGV ~0.2 s despues de crear /dev/socket/pps y la UI se queda sin composer
+# (el stack de display reacciona al panel/táctil). Se deja para el final.
+modprobe raydium_i2c_ts 2>/dev/null && echo "dace-lxc-hal-start: tactil Raydium RM32380 cargado" \
+    || echo "dace-lxc-hal-start: aviso, no se pudo cargar raydium_i2c_ts"
 sleep 3
-grep -q "Zinitix" /proc/bus/input/devices 2>/dev/null && echo "dace-hal: táctil presente (event2)" \
-    || echo "dace-hal: táctil AUSENTE"
+grep -q "Raydium" /proc/bus/input/devices 2>/dev/null && echo "dace-hal: táctil Raydium PRESENTE" \
+    || echo "dace-hal: táctil Raydium AUSENTE (revisar dmesg: raydium/rgpio)
 
 # Comprobacion: que el servicio responda (el cliente lo pide por el bus)
 sleep 5

@@ -147,3 +147,7 @@ CONFIG_STACKPROTECTOR_STRONG=y
 # evdevtouch:/dev/input/event2, que no existe). Su unica dependencia (I2C) se
 # cumple. Se pone =y para que probe en el arranque sin depender de modprobe.
 CONFIG_TOUCHSCREEN_ZINITIX=m
+# ── TÁCTIL REAL: RAYDIUM RM32380 (i2c-1 @0x39) ───────────────────────────────
+# El Zinitix de arriba es boilerplate de Samsung (no hay chip). El táctil real
+# del T5 es un Raydium y el driver ya está en el árbol (mainline).
+CONFIG_TOUCHSCREEN_RM_TS=m
