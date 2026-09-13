@@ -286,14 +286,15 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
     # para obtener dominio IOMMU. Si quedara un blacklist de un boot anterior,
     # borrarlo (el modulo ya esta cargado, pero el archivo confunde).
     rm -f $BOOT_DIR/etc/modprobe.d/00-dace-no-qnoc.conf
-    # Tactil: que udev NO cargue el driver zinitix en el coldplug (~10 s). El
-    # tactil va DESPUES de los HAL de display (dace-lxc-hal-start.sh hace
-    # 'modprobe zinitix'): si el driver esta presente antes, el composer-service
-    # de Qualcomm muere con SIGSEGV y la UI se queda sin composer.
+    # Tactil: que udev NO cargue drivers de tactil en el coldplug. El tactil va
+    # DESPUES de los HAL de display (dace-lxc-hal-start.sh carga la cadena del
+    # vendor: slate_events_bridge/slate_mobvoi_rpc/zinitix-i2c desde
+    # /usr/lib/dace-vendor-modules, fuera de /lib/modules -> udev no los ve).
+    # blacklist zinitix por retrocompat (el .ko ya no existe en el kernel).
     BL="$BOOT_DIR/etc/modprobe.d/00-dace-vendor-blacklist.conf"
     if ! grep -qs '^blacklist zinitix' "$BL"; then
         mkdir -p "$BOOT_DIR/etc/modprobe.d"
-        printf '\n# tactil: se carga despues de los HAL de display (modprobe zinitix)\nblacklist zinitix\n' >> "$BL"
+        printf '\n# tactil: se carga despues de los HAL de display (cadena vendor en dace-lxc-hal-start.sh)\nblacklist zinitix\n' >> "$BL"
         info "blacklist zinitix anadida (tactil se carga tras los HAL)"
     fi
     # mce: quitar el filtro de brillo por sensor de luz (ALS). El T5 no tiene

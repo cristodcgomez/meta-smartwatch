@@ -32,11 +32,22 @@ done
 # táctil presente desde el arranque, el composer-service de Qualcomm muere con
 # SIGSEGV ~0.2 s despues de crear /dev/socket/pps y la UI se queda sin composer
 # (el stack de display reacciona al panel/táctil). Se deja para el final.
-modprobe zinitix 2>/dev/null && echo "dace-lxc-hal-start: tactil Zinitix cargado" \
-    || echo "dace-lxc-hal-start: aviso, no se pudo cargar zinitix"
+#
+# Tactil Zinitix: CADENA DEL VENDOR (stock .ko, ver AGENTS.md §5). Requiere el
+# kernel con el slot ABI de cfi_check + SCS (dace-module-cfi-abi-slot.patch,
+# CONFIG_SHADOW_CALL_STACK). Nuestro zinitix mainline ya no existe (=n en el
+# fragment). Orden exacto medido en vivo:
+#   rpmsg del bridge -> bridge -> mobvoi_rpmsg -> mobvoi -> zinitix-i2c
+modprobe panel_event_notifier 2>/dev/null
+VD=/usr/lib/dace-vendor-modules
+for m in slate_events_bridge_rpmsg slate_events_bridge slate_mobvoi_rpc_rpmsg slate_mobvoi_rpc zinitix-i2c; do
+    insmod "$VD/$m.ko" 2>/dev/null \
+        && echo "dace-lxc-hal-start: vendor $m cargado" \
+        || echo "dace-lxc-hal-start: aviso, no se pudo cargar $m"
+done
 sleep 3
-grep -qE "Zinitix|Raydium" /proc/bus/input/devices 2>/dev/null && echo "dace-hal: táctil PRESENTE" \
-    || echo "dace-hal: táctil AUSENTE"
+grep -q "zinitix_ts" /proc/bus/input/devices 2>/dev/null && echo "dace-hal: tactil PRESENTE (zinitix_ts vendor)" \
+    || echo "dace-hal: tactil AUSENTE"
 
 # Comprobacion: que el servicio responda (el cliente lo pide por el bus)
 sleep 5

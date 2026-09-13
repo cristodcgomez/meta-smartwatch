@@ -151,14 +151,22 @@ CONFIG_STACKPROTECTOR_STRONG=y
 # CONFIG_WQ_WATCHDOG is not set
 # CONFIG_QCOM_SOC_WATCHDOG is not set
 
-# ── TACTIL: el T5 lleva un ZINITIX (i2c-1 @0x20, nodo zinitix_ts@20) ──────────
-# El driver mainline (drivers/input/touchscreen/zinitix.c) existe en el arbol
-# pero NO estaba activado -> ningun driver se enlazaba al nodo y no existia
-# /dev/input/eventX de tactil (el compositor arrancaba con
-# evdevtouch:/dev/input/event2, que no existe). Su unica dependencia (I2C) se
-# cumple. Se pone =y para que probe en el arranque sin depender de modprobe.
-CONFIG_TOUCHSCREEN_ZINITIX=m
+# ── TACTIL: driver del VENDOR Zinitix (bt541_ts_device, zinitix-i2c.ko) ────
+# EL TACTIL FUNCIONA con el driver del VENDOR (ver AGENTS.md §5). Nuestro
+# zinitix.ko mainline se QUITA (=n): se queda con 1-0020 y bloquearia el probe
+# del vendor (solo un driver puede bindear). El vendor se instala con la
+# receta dace-vendor-touch y se carga desde dace-lxc-hal-start.sh tras los HAL.
+# CONFIG_TOUCHSCREEN_ZINITIX is not set
 # ── TÁCTIL REAL: RAYDIUM RM32380 (i2c-1 @0x39) ───────────────────────────────
 # El Zinitix de arriba es boilerplate de Samsung (no hay chip). El táctil real
 # del T5 es un Raydium y el driver ya está en el árbol (mainline).
 CONFIG_TOUCHSCREEN_RM_TS=m
+
+# ── SHADOW CALL STACK (compat con .ko vendor stock) ──────────────────────────
+# Los .ko stock (Mobvoi msm-5.15 g7f9d6c16b5cd) se compilaron con SCS: guardan
+# x30 vía x18 (str x30,[x18],#8). Sin SCS en el kernel, x18 es basura y cada
+# push/pop corrompe memoria. Con SCS=y (GKI lo lleva: gki_defconfig) x18 queda
+# reservado y los .ko stock corren tal cual. Dependencia: FUNCTION_TRACER=n
+# (se cumple) y clang (se usa). El slot ABI de cfi_check va aparte
+# (dace-module-cfi-abi-slot.patch).
+CONFIG_SHADOW_CALL_STACK=y

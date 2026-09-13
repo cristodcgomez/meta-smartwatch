@@ -1,0 +1,49 @@
+dace: slot ABI de cfi_check en struct module (compat con .ko vendor stock)
+
+El kernel stock (Mobvoi/Google eos, msm-5.15 g7f9d6c16b5cd) se compila con
+CONFIG_CFI_CLANG=y, que anade el campo `cfi_check_fn cfi_check` justo tras
+`num_syms` en `struct module` (+8 bytes para todo lo posterior). Nuestro
+kernel no puede activar CFI (CFI_CLANG exige LTO_CLANG, off por OOM del host),
+asi que el campo no existe y TODOS los campos posteriores quedan
+desalineados respecto a los .ko prebuilt del vendor.
+
+Consecuencia medida (13-09-2026, tactil Zinitix): los .ko stock cargan
+(initstate=live) pero el loader lee `mod->init` en NUESTRO offset (8 bytes
+antes), donde hay NULL -> do_init_module NUNCA llama al init: el modulo queda
+vivo, no registra nada, no imprime y no crashea. Afectaba a zinitix-i2c,
+slate_events_bridge, slate_mobvoi_rpc y al resto de la coleccion vendor.
+
+Con el hueco, los .ko stock mantienen su layout (init/exit/kp/kallsyms/
+refcnt en los mismos offsets) y su init ejecuta normalmente.
+Offsets medidos en .gnu.linkonce.this_module: init@0x178/exit@0x378 (stock)
+vs init@0x170/exit@0x368 (nuestro sin slot). Verificado en vivo: el driver
+del vendor bt541_ts_device hace probe SUCCESS y el tactil funciona.
+
+Nota SCS: los .ko stock usan shadow-call-stack (x18); eso se cubre con
+CONFIG_SHADOW_CALL_STACK=y en sw5100.fragment (no con este parche).
+
+Upstream-Status: Inappropriate [dace bring-up: compat con modulos vendor prebuilts]
+Signed-off-by: dace-port <dace@localhost>
+diff --git a/include/linux/module.h b/include/linux/module.h
+--- a/include/linux/module.h
++++ b/include/linux/module.h
+@@ -391,6 +391,19 @@
+ 
+ #ifdef CONFIG_CFI_CLANG
+ 	cfi_check_fn cfi_check;
++#else
++	/*
++	 * dace: ABI slot. El kernel stock (Mobvoi/Google eos) se compila con
++	 * CONFIG_CFI_CLANG=y, que coloca `cfi_check_fn cfi_check` justo tras
++	 * num_syms (+8). Mantenemos el hueco para que los modulos prebuilt del
++	 * vendor mantengan su layout de `struct module` alineado con el nuestro
++	 * (mod->init, mod->exit, mod->kp, ... en los mismos offsets). Sin el,
++	 * el loader lee mod->init de un offset desalineado (NULL) y los modulos
++	 * stock cargan pero su init JAMAS se ejecuta.
++	 * Medido: init@0x178/exit@0x378 (stock) vs init@0x170/exit@0x368
++	 * (nuestro, sin slot).
++	 */
++	void *cfi_check_abi_pad;
+ #endif
+ 
+ 	/* Kernel parameters. */
