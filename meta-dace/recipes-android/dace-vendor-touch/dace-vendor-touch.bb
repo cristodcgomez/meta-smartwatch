@@ -31,5 +31,7 @@ do_install() {
 }
 
 FILES:${PN} = "${nonarch_base_libdir}/dace-vendor-modules/*"
-INHIBIT_DEFAULT_DEPS = "1"
+# Sin strip ni split de debug: son prebuilts del stock, no tocar los binarios.
+INHIBIT_PACKAGE_STRIP = "1"
+INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
