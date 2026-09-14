@@ -6,7 +6,7 @@ CONFIG_SHADOW_CALL_STACK=y en el kernel. Se instalan FUERA de /lib/modules para 
 que udev/depmod no los autoloade: los carga dace-lxc-hal-start.sh tras los HAL \
 de display, en orden, ver AGENTS.md §5."
 LICENSE = "GPL-2.0-only"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6"
+LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0-only;md5=e19c494d1f55a5e0a10b01a7f14e4cdd"
 
 SRC_URI = "file://slate_events_bridge.ko \
            file://slate_events_bridge_rpmsg.ko \
