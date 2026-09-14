@@ -14,7 +14,7 @@ SRC_URI = "file://slate_events_bridge.ko \
            file://slate_mobvoi_rpc_rpmsg.ko \
            file://zinitix-i2c.ko"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 # Destino deliberadamente FUERA de /lib/modules: sin depmod, sin autoload de
 # udev (el coldplug de modulos vendor dejaba el SoC en reset, AGENTS §7/§11).
@@ -25,7 +25,7 @@ do_install() {
     install -d ${D}${nonarch_base_libdir}/dace-vendor-modules
     for f in slate_events_bridge.ko slate_events_bridge_rpmsg.ko \
              slate_mobvoi_rpc.ko slate_mobvoi_rpc_rpmsg.ko zinitix-i2c.ko; do
-        install -m 0644 ${WORKDIR}/${f} \
+        install -m 0644 ${UNPACKDIR}/${f} \
             ${D}${nonarch_base_libdir}/dace-vendor-modules/${f}
     done
 }
