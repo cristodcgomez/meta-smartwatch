@@ -25,9 +25,10 @@ CONFIG_SHADOW_CALL_STACK=y en sw5100.fragment (no con este parche).
 Upstream-Status: Inappropriate [dace bring-up: compat con modulos vendor prebuilts]
 Signed-off-by: dace-port <dace@localhost>
 diff --git a/include/linux/module.h b/include/linux/module.h
+index 0f004d5..b6420b8 100644
 --- a/include/linux/module.h
 +++ b/include/linux/module.h
-@@ -391,6 +391,19 @@
+@@ -391,6 +391,19 @@ struct module {
  
  #ifdef CONFIG_CFI_CLANG
  	cfi_check_fn cfi_check;
@@ -47,3 +48,18 @@ diff --git a/include/linux/module.h b/include/linux/module.h
  #endif
  
  	/* Kernel parameters. */
+@@ -422,6 +435,14 @@ struct module {
+ 	/* Startup function. */
+ 	int (*init)(void);
+ 
++	/*
++	 * dace: segundo slot ABI. El stock tambien tiene +8 aqui (entre init y
++	 * exit) respecto a nuestro kernel (mod->exit: 0x378 stock vs 0x368
++	 * nuestro, con ambos this_module de 0x3c0). Sin el, mod->exit de los
++	 * .ko stock caeria desalineado y el rmmod saltaria a basura.
++	 */
++	void *dace_abi_pad_post_init;
++
+ 	/* Core layout: rbtree is accessed frequently, so keep together. */
+ 	struct module_layout core_layout __module_layout_align;
+ 	struct module_layout init_layout;
