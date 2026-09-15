@@ -4,7 +4,7 @@ COMPATIBLE_MACHINE:dace = "dace"
 # Dace uses an early modprobe loop from /etc/modules.load.dace. The loop is
 # required because dace's eMMC driver (sdhci_msm.ko) and ~85 other vendor
 # drivers are =m on this GKI kernel.
-SRC_URI:append:dace = " file://init.sh file://modules.load.dace file://google-extcon-usb-shim.conf"
+SRC_URI:append:dace = " file://init.sh file://modules.load.dace file://google-extcon-usb-shim.conf file://dace-syncfs"
 
 do_install:append:dace() {
     install -m 0755 ${UNPACKDIR}/init.sh ${D}/init
@@ -19,6 +19,12 @@ do_install:append:dace() {
     # Override via modprobe.d so the param applies the moment the busybox
     # modprobe loop loads the shim module.
     install -m 0644 -D ${UNPACKDIR}/google-extcon-usb-shim.conf ${D}/etc/modprobe.d/google-extcon-usb-shim.conf
+
+    # dace-syncfs: fuerza el checkpoint de F2FS (syncfs) sobre /sdcard. Necesario
+    # porque busybox sync NO hace checkpoint y un 'reboot -f' desde el initramfs
+    # deja el F2FS sucio -> recovery -> los ficheros recien escritos (p.ej.
+    # /sdcard/dace-mode) revierten. Uso:  dace-syncfs
+    install -m 0755 ${UNPACKDIR}/dace-syncfs ${D}/usr/bin/dace-syncfs
 }
 
-FILES:${PN}:append:dace = " /etc/modules.load.dace /etc/modprobe.d/google-extcon-usb-shim.conf"
+FILES:${PN}:append:dace = " /etc/modules.load.dace /etc/modprobe.d/google-extcon-usb-shim.conf /usr/bin/dace-syncfs"

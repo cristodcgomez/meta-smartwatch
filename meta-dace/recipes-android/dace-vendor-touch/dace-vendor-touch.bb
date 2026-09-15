@@ -1,10 +1,11 @@
 SUMMARY = "Modulos vendor stock (Mobvoi) para el tactil Zinitix y la pila slate de eventos"
-DESCRIPTION = "Los .ko prebuilt del OTA stock (sin la seccion __versions, se cargan \
-con taint forzado) que hacen funcionar el tactil bt541_ts_device. Requieren el \
-slot ABI de cfi_check en struct module (dace-module-cfi-abi-slot.patch) y \
-CONFIG_SHADOW_CALL_STACK=y en el kernel. Se instalan FUERA de /lib/modules para \
-que udev/depmod no los autoloade: los carga dace-lxc-hal-start.sh tras los HAL \
-de display, en orden, ver AGENTS.md §5."
+DESCRIPTION = "Los .ko prebuilt del OTA stock, ya PARCHEADOS para nuestro kernel \
+(SIN __versions: carga forzada; SCS NOPeado y reloc de exit recolocado, ver \
+files/README.txt y patch-stock-module.py). Sin el parche SCS, el boot del rootfs \
+crashea (x18 es basura en nuestro kernel: no tiene SHADOW_CALL_STACK). Requieren \
+el slot ABI de cfi_check en struct module (dace-module-cfi-abi-slot.patch). Se \
+instalan FUERA de /lib/modules para que udev/depmod no los autoloade: los carga \
+dace-lxc-hal-start.sh tras los HAL de display, en orden, ver AGENTS.md §5."
 LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-2.0-only;md5=801f80980d171dd6425610833a22dbe6"
 

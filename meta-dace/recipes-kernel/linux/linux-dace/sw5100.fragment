@@ -164,9 +164,11 @@ CONFIG_TOUCHSCREEN_RM_TS=m
 
 # ── SHADOW CALL STACK (compat con .ko vendor stock) ──────────────────────────
 # Los .ko stock (Mobvoi msm-5.15 g7f9d6c16b5cd) se compilaron con SCS: guardan
-# x30 vía x18 (str x30,[x18],#8). Sin SCS en el kernel, x18 es basura y cada
-# push/pop corrompe memoria. Con SCS=y (GKI lo lleva: gki_defconfig) x18 queda
-# reservado y los .ko stock corren tal cual. Dependencia: FUNCTION_TRACER=n
-# (se cumple) y clang (se usa). El slot ABI de cfi_check va aparte
-# (dace-module-cfi-abi-slot.patch).
+# x30 vía x18 (str x30,[x18],#8).
+# OJO: esta linea NO surte efecto (comprobado 15-09-2026: el .config final no
+# tiene CONFIG_SHADOW_CALL_STACK y un modulo nuestro recien compilado sale con
+# 0 instrucciones SCS; el Kconfig la descarta en esta configuracion). Por eso
+# los .ko del vendor se NOPean en la receta dace-vendor-touch (ver su
+# files/README.txt y patch-stock-module.py). Se deja la linea por si algun dia
+# se puede activar: entonces habria que bakear los .ko SIN parchear.
 CONFIG_SHADOW_CALL_STACK=y

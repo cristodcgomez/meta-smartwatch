@@ -266,6 +266,15 @@ DEBUG_RAMFS=0
 #   boot noautoload nolxc crashlog   (combinable)
 #
 #   adb shell 'echo "boot noautoload nolxc" > /sdcard/dace-mode; reboot'
+#
+# ⚠️ ANTES DE REINICIAR: 'dace-syncfs' (fuerza el checkpoint de F2FS).
+# busybox sync NO hace checkpoint y un 'reboot -f' deja el F2FS sucio: al
+# arrancar, la recovery de F2FS puede no ver el fichero recien escrito y el
+# boot cae al modo seguro (nos costo un buen rato: parecia que el flag "se
+# perdia"). Lo correcto desde el initramfs:
+#   echo boot > /sdcard/dace-mode; dace-syncfs; reboot -f
+# (dace-syncfs se instala en /usr/bin/dace-syncfs del initramfs; tambien hay
+#  una copia de socorro en /sdcard/dace-syncfs.)
 DEBUG_MODE=""
 if grep -q "dace.debug=1" /proc/cmdline; then
     DEBUG_MODE=$(cat /sdcard/dace-mode 2>/dev/null | tr '\n' ' ')
