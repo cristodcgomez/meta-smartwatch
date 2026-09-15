@@ -34,4 +34,7 @@ FILES:${PN} = "${nonarch_base_libdir}/dace-vendor-modules/*"
 # Sin strip ni split de debug: son prebuilts del stock, no tocar los binarios.
 INHIBIT_PACKAGE_STRIP = "1"
 INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
+# Los .ko son del KERNEL (aarch64); el userland del paquete es ARM32: el QA de
+# arch siempre fallaria. Son modulos de kernel, no binarios de userspace.
+INSANE_SKIP:${PN} = "arch"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
