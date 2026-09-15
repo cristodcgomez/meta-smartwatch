@@ -37,4 +37,7 @@ INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
 # Los .ko son del KERNEL (aarch64); el userland del paquete es ARM32: el QA de
 # arch siempre fallaria. Son modulos de kernel, no binarios de userspace.
 INSANE_SKIP:${PN} = "arch"
+# Nada que stagear al sysroot: evita que el strip del sysroot (crosstool) intente
+# procesar los .ko aarch64 ("file format not recognized").
+SYSROOT_DIRS = ""
 PACKAGE_ARCH = "${MACHINE_ARCH}"
