@@ -28,3 +28,10 @@ do_install:append:dace() {
 }
 
 FILES:${PN}:append:dace = " /etc/modules.load.dace /etc/modprobe.d/google-extcon-usb-shim.conf /usr/bin/dace-syncfs"
+
+# dace-syncfs es un ELF ARM estatico (syscall syncfs) prebuilt: el split de
+# debug de do_package deja /usr/bin/.debug/dace-syncfs, y como esta receta solo
+# tiene ${PN} (PACKAGES="${PN}", sin -dbg) salta el QA installed-vs-shipped.
+# En el initramfs no queremos simbolos ni strip.
+INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
+INHIBIT_PACKAGE_STRIP = "1"
