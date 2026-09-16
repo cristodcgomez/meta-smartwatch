@@ -24,7 +24,7 @@ do_install:append:dace() {
     # porque busybox sync NO hace checkpoint y un 'reboot -f' desde el initramfs
     # deja el F2FS sucio -> recovery -> los ficheros recien escritos (p.ej.
     # /sdcard/dace-mode) revierten. Uso:  dace-syncfs
-    install -m 0755 ${UNPACKDIR}/dace-syncfs ${D}/usr/bin/dace-syncfs
+    install -m 0755 -D ${UNPACKDIR}/dace-syncfs ${D}/usr/bin/dace-syncfs
 }
 
 FILES:${PN}:append:dace = " /etc/modules.load.dace /etc/modprobe.d/google-extcon-usb-shim.conf /usr/bin/dace-syncfs"
