@@ -1,0 +1,121 @@
+From: TicWatch Pro 5 (dace) port
+Subject: [PATCH] iommu/arm-smmu: forzar BYPASS en los streams del QUP y su GPI
+
+El BT (UART HS, SE5 @4a94000) y el slate-spi (SE4 @4a90000) son hijos del
+wrapper QUP @4ac0000; su DMA (SE-DMA del UART, GPI del SPI) cuelga del stream
+0xe3 (wrapper) y 0xf6 (GPI @4a00000). El wrapper es built-in
+(CONFIG_QCOM_GENI_SE=y) y se crea en arch_initcall, mientras que el apps-smmu
+es modulo; of_iommu_configure() no encuentra ops al crear el device y NO se
+reintenta, asi que el wrapper nunca obtiene grupo/dominio IOMMU (a diferencia
+del display/kgsl, que se crean tarde).
+
+El firmware dejo esos streams en TRANS con SUS propias tablas; nuestro DMA va
+a direcciones FISICAS (dma_map_single del SPI ya medido: domain=0), el SMMU las
+traduce mal y el motor DMA se lleva un bus error:
+
+  - BT:  WARNING handle_rx_dma_xfer (RX_SBE) -> reset duro.
+  - SPI: spi_gsi_ch_cb (GPI general error)   -> reset duro.
+
+El eMMC (stream 0xc0) tambien tiene iommus pero SIN grupo IOMMU y funciona:
+el firmware lo dejo en BYPASS. Hacemos lo mismo con 0xe3 y 0xf6. Ademas se
+loguea la tabla SMR del firmware (id/mask/type/cbndx) para diagnostico.
+
+Esto desbloquea BOTH el BT y la corona (slate GSI/GPI), que comparten origen.
+
+Upstream-Status: Inappropriate [dace bring-up]
+---
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu.c
+@@ -3541,6 +3541,74 @@
+  * EDL. Leemos la tabla viva y marcamos las entradas en uso como validas y
+  * pinned para que Linux las respete.
+  */
++/*
++ * dace (TicWatch Pro 5): el wrapper QUP (@4ac0000, stream 0xe3) y su GPI DMA
++ * (@4a00000, stream 0xf6) NO tienen dominio IOMMU en Linux: el wrapper es
++ * built-in (CONFIG_QCOM_GENI_SE=y) y se crea en arch_initcall, mientras el
++ * apps-smmu es modulo; of_iommu_configure() no encuentra ops al crear el
++ * device y NO se reintenta. El firmware los dejo en TRANS con SUS tablas,
++ * pero nuestro DMA (SE-DMA del BT UART, GPI del slate-spi) va a direcciones
++ * FISICAS -> el SMMU las traduce mal -> SBE / GPI general error -> reset duro.
++ * Los forzamos a BYPASS, igual que el eMMC (que si funciona sin grupo IOMMU).
++ */
++#define DACE_QUP_WRAPPER_SID	0xe3
++#define DACE_QUP_GPI_SID	0xf6
++
++static void arm_smmu_dace_force_bypass(struct arm_smmu_device *smmu, u16 sid)
++{
++	struct arm_smmu_smr *smr;
++	struct arm_smmu_s2cr *s2cr;
++	int i, free_idx = -1;
++
++	/* 1) si el firmware ya tiene un SMR que cubre este stream, forzar BYPASS */
++	for (i = 0; i < smmu->num_mapping_groups; ++i) {
++		smr = &smmu->smrs[i];
++		if (!smr->valid)
++			continue;
++		if ((sid & ~smr->mask) != (smr->id & ~smr->mask))
++			continue;
++		s2cr = &smmu->s2crs[i];
++		s2cr->type = S2CR_TYPE_BYPASS;
++		s2cr->privcfg = S2CR_PRIVCFG_DEFAULT;
++		s2cr->cbndx = 0;
++		arm_smmu_write_s2cr(smmu, i);
++		dev_err(smmu->dev,
++			"DACE-SMMU: stream 0x%x -> BYPASS (SMR %d existente)\n",
++			sid, i);
++		return;
++	}
++
++	/* 2) si no existe, programar uno nuevo (mask 0) en el primer hueco */
++	for (i = 0; i < smmu->num_mapping_groups; ++i) {
++		if (!smmu->smrs[i].valid && !smmu->s2crs[i].pinned) {
++			free_idx = i;
++			break;
++		}
++	}
++	if (free_idx < 0) {
++		dev_err(smmu->dev, "DACE-SMMU: sin SMR libre para 0x%x\n", sid);
++		return;
++	}
++
++	smr = &smmu->smrs[free_idx];
++	smr->id = sid;
++	smr->mask = 0;
++	smr->valid = true;
++	smr->pinned = true;
++	s2cr = &smmu->s2crs[free_idx];
++	s2cr->group = NULL;
++	s2cr->count = 0;
++	s2cr->type = S2CR_TYPE_BYPASS;
++	s2cr->privcfg = S2CR_PRIVCFG_DEFAULT;
++	s2cr->cbndx = 0;
++	s2cr->pinned = true;
++	arm_smmu_write_s2cr(smmu, free_idx);
++	arm_smmu_write_smr(smmu, free_idx);
++	dev_err(smmu->dev,
++		"DACE-SMMU: stream 0x%x -> BYPASS (SMR %d nuevo)\n",
++		sid, free_idx);
++}
++
+ static void arm_smmu_mark_hw_smrs(struct arm_smmu_device *smmu)
+ {
+ 	u32 smr, s2cr;
+@@ -3586,9 +3654,17 @@
+ 			bitmap_set(smmu->context_map, smmu->s2crs[i].cbndx, 1);
+ 			cbs++;
+ 		}
++		dev_err(smmu->dev,
++			"DACE-SMMU: FW SMR[%d] id=0x%x mask=0x%x type=%d cbndx=%d\n",
++			i, smmu->smrs[i].id, smmu->smrs[i].mask,
++			smmu->s2crs[i].type, smmu->s2crs[i].cbndx);
+ 		used++;
+ 	}
+ 
++	/* dace: BT UART (SE-DMA) y slate-spi (GPI) -> BYPASS */
++	arm_smmu_dace_force_bypass(smmu, DACE_QUP_WRAPPER_SID);
++	arm_smmu_dace_force_bypass(smmu, DACE_QUP_GPI_SID);
++
+ 	dev_err(smmu->dev,
+ 		"DACE-SMMU %s: tabla del firmware: %d/%d SMR en uso, %d context banks reservados\n",
+ 		dev_name(smmu->dev), used, smmu->num_mapping_groups, cbs);
