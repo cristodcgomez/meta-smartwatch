@@ -9,15 +9,15 @@ COMPATIBLE_MACHINE = "dace"
 
 SRC_URI = "file://dace-btattach.service"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 do_install() {
-    install -d ${D}${systemd_system_unitdir}
+    install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${UNPACKDIR}/dace-btattach.service \
-        ${D}${systemd_system_unitdir}/dace-btattach.service
+        ${D}${systemd_unitdir}/system/dace-btattach.service
 }
 
-FILES:${PN} = "${systemd_system_unitdir}/dace-btattach.service"
+FILES:${PN} = "${systemd_unitdir}/system/dace-btattach.service"
 
 inherit systemd
 SYSTEMD_SERVICE:${PN} = "dace-btattach.service"

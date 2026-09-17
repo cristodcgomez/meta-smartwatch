@@ -8,7 +8,7 @@ COMPATIBLE_MACHINE = "dace"
 SRC_URI = "file://qca/apbtfw11.tlv \
            file://qca/apnv11.bin"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 do_install() {
     install -d ${D}${nonarch_base_libdir}/firmware/qca
