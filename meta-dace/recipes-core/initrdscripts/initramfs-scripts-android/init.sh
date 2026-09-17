@@ -112,7 +112,7 @@ while read mod; do
     # msm_drm.ko) exige que el apps-smmu ya este para obtener dominio IOMMU, y
     # queremos la consola capturando el arranque del display.
     case "$name" in
-        qnoc-monaco|msm_drm|msm_kgsl)
+        qnoc-monaco|msm_drm|msm_kgsl|msm_geni_serial)
             info "M-- ${name} (diferido al arranque del display)"
             continue ;;
     esac
@@ -143,6 +143,11 @@ setup_usb_console
 sleep 2
 info "DISPLAY: consola arriba, cargando qnoc-monaco"
 modprobe qnoc-monaco 2>/dev/kmsg ; info "DISPLAY: qnoc-monaco rc=$?"
+# msm_geni_serial DESPUES del qnoc: su geni_icc_get("qup-config") debe ver los
+# nodos del qnoc ya registrados. Si no, of_icc_get devuelve -EINVAL (provider
+# arriba pero nodo aun no) y el probe del UART FALLA sin reintento -> no aparece
+# /dev/ttyHS0 (BT). Los i2c/spi se salvaban por timing (defer + retry).
+modprobe msm_geni_serial 2>/dev/kmsg ; info "DISPLAY: msm_geni_serial rc=$?"
 modprobe msm_drm 2>/dev/kmsg     ; info "DISPLAY: msm_drm rc=$?"
 modprobe msm_kgsl 2>/dev/kmsg    ; info "DISPLAY: msm_kgsl rc=$?"
 info "DISPLAY: fin de la carga (si sigues viendo esto, no hubo reset)"
