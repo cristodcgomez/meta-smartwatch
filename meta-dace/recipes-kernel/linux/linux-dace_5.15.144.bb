@@ -35,6 +35,7 @@ SRC_URI = "git://gitlab.com/ubports/porting/community-ports/android13/google-eos
            file://zinitix-reset-gpio.patch \
            file://raydium-dace-polarity.patch \
            file://icc-rpm-novote.patch \
+           file://wcn3988-bt.patch \
            file://phy-msm-snps-hs-trace.patch \
            file://rtc-pm8xxx-read-only.patch \
            file://0001-video-fbdev-add-qcom-continuous-splash-framebuffer.patch \
