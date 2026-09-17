@@ -21,6 +21,8 @@ FILES:${PN} = "${systemd_unitdir}/system/dace-btattach.service"
 
 inherit systemd
 SYSTEMD_SERVICE:${PN} = "dace-btattach.service"
-SYSTEMD_AUTO_ENABLE:${PN} = "enable"
+# Por seguridad no se auto-arranca: el attach historico reseteo el SoC.
+# Probar a mano (systemctl start dace-btattach) y, si va, poner "enable".
+SYSTEMD_AUTO_ENABLE:${PN} = "disable"
 
 RDEPENDS:${PN} += "bluez5"
