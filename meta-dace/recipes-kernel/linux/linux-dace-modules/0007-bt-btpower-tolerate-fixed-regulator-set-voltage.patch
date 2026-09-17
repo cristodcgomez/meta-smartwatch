@@ -1,0 +1,31 @@
+From: TicWatch Pro 5 port
+Subject: [PATCH] bt: btpower: tolerar el -EINVAL de regulator_set_voltage
+
+En monaco los rieles del BT (qcom,bt-vdd-io/core/pa/xtal) son RPM regulators
+FIJOS (min==max), pero btpower pide un rango (p.ej. 3000000-3312000 para el PA)
+y el core devuelve -EINVAL aunque el valor objetivo sea el que el riel ya tiene.
+btpower aborta bluetooth_power(1) -> el chip no se alimenta y btattach queda
+colgado (sin reset, pero sin HCI). No abortar: log y seguir con el enable.
+
+Upstream-Status: Inappropriate [dace bring-up]
+---
+
+--- a/private/msm-google-modules/bt/pwr/btpower.c
++++ b/private/msm-google-modules/bt/pwr/btpower.c
+@@ -292,9 +292,14 @@
+ 						vreg->min_vol,
+ 						vreg->max_vol);
+ 			if (rc < 0) {
+-				pr_err("%s: regulator_set_voltage(%s) failed rc=%d\n",
++				/* dace: en monaco los rieles BT son RPM
++				 * regulators FIJOS (min==max) y el core rechaza
++				 * el rango con -EINVAL aunque el valor sea el
++				 * correcto. No abortar: el riel ya esta a su
++				 * tension; seguir con el enable. */
++				pr_warn("%s: set_voltage(%s) rc=%d (riel fijo, se ignora)\n",
+ 						__func__, vreg->name, rc);
+-				goto out;
++				rc = 0;
+ 			}
+ 		}
+ 
