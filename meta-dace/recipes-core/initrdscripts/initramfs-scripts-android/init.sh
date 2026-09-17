@@ -322,7 +322,7 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
     # Desenmascarar el USB del rootfs (un boot de debug anterior pudo
     # enmascararlo para proteger la consola). Con esto usb-moded del rootfs
     # levanta adb (fix PREFERRED_PROVIDER android-tools-conf-configfs).
-    for u in init_gfs.service usb-moded.service android-tools-adbd.service adbd-prepare.service; do
+    for u in init_gfs.service usb-moded.service android-tools-adbd.service adbd-prepare.service dace-lxc-android.service; do
         f="$BOOT_DIR/etc/systemd/system/$u"
         if [ -L "$f" ] && [ "$(readlink $f 2>/dev/null)" = "/dev/null" ]; then
             rm -f "$f"
