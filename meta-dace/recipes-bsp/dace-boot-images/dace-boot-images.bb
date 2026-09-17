@@ -251,7 +251,24 @@ do_compile() {
         else
             bbwarn "$dtb: falta monaco-idp-v1-overlay.dtbo"
         fi
-        bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, sin OPP) + RAYDIUM rm32380 @0x39 (i2c-1) + zinitix disabled"
+        # ── BT/WCN3988: rieles del btpower ─────────────────────────────
+        # El DTB stock trae el nodo pelado (solo compatible). Los rieles
+        # reales estan en el source stock monaco-standalone-idp-v1.dtsi:
+        # IO=L17A (0x184), core/RFA=L13A (0x181), PA/CH0=L26A (0x84),
+        # XO=L14A (0x131). Todos RPM regulators (rpm_smd_regulator).
+        # Se anade compatible "qcom,wcn3990" para que btpower use la tabla
+        # wcn399x (io/core/pa/xtal) y no la qcc5100 (solo pa).
+        "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
+            compatible "qcom,qcc5100" "qcom,wcn3990"
+        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
+            qcom,bt-vdd-io-supply 0x184
+        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
+            qcom,bt-vdd-core-supply 0x181
+        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
+            qcom,bt-vdd-pa-supply 0x84
+        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
+            qcom,bt-vdd-xtal-supply 0x131
+        bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, sin OPP) + RAYDIUM rm32380 @0x39 (i2c-1) + zinitix disabled + BT rieles"
     done
     cat ${WORKDIR}/monaco-real-per.dtb ${WORKDIR}/monacop-per.dtb > ${WORKDIR}/dtb-blob-vendor.bin
     bbnote "DTB blob vendor_boot: $(stat -c%s ${WORKDIR}/dtb-blob-vendor.bin) bytes (stock=572016)"

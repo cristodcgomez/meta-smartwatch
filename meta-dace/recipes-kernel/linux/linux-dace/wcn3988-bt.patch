@@ -1,16 +1,17 @@
 From: TicWatch Pro 5 port
-Subject: [PATCH] Bluetooth: hci_qca/btqca: add WCN3988 support (dace bring-up)
+Subject: [PATCH] Bluetooth: hci_qca/btqca: add WCN3988 support + LDISC default (dace)
 
-Backport minimo del soporte QCA WCN3988 (BT del T5) desde el arbol
-t5-gki-kernel 5.15:
+Backport minimo del soporte QCA WCN3988 (BT del T5) desde t5-gki-kernel 5.15:
  - btqca.h: enum QCA_WCN3988 (+ en qca_is_wcn399x).
- - btqca.c: rom_ver distinto y nombres de firmware "qca/apbtfw%02x.tlv" /
-   "qca/apnv%02x.bin" (familia "ap" del WCN3988).
- - hci_qca.c: qca_soc_data_wcn3988 (vregs vddio/vddxo/vddrf/vddch0) y el
-   compatible "qcom,wcn3988-bt" para la ruta serdev.
+ - btqca.c: rom_ver distinto y nombres "qca/apbtfw%02x.tlv" / "qca/apnv%02x.bin".
+ - hci_qca.c: qca_soc_data_wcn3988 + compatible "qcom,wcn3988-bt" (serdev, por
+   si algun dia se porta serdev al geni-serial).
+ - hci_qca.c: en la ruta LDISC (btattach, sin serdev) forzar QCA_WCN3988 en vez
+   de QCA_ROME (dace-only; ningun driver geni-serial de este arbol soporta
+   serdev, asi que el HCI va por btattach -P qca).
 
-Rieles reales (del stock monaco-standalone-idp-v1.dtsi): IO=L17A,
-core/RFA=L13A, PA/CH0=L26A (en nuestro DTB pm5100_l17/l13/l26).
+Rieles reales (del stock monaco-standalone-idp-v1.dtsi): IO=L17A (0x184),
+core/RFA=L13A (0x181), PA/CH0=L26A (0x84).
 
 Upstream-Status: Inappropriate [dace bring-up]
 ---
@@ -72,10 +73,23 @@ index 30afa7703..ecf989c64 100644
  static inline bool qca_is_wcn6750(enum qca_btsoc_type soc_type)
  {
 diff --git a/drivers/bluetooth/hci_qca.c b/drivers/bluetooth/hci_qca.c
-index 56b4b7248..be1da1685 100644
+index 56b4b7248..029ba49c9 100644
 --- a/drivers/bluetooth/hci_qca.c
 +++ b/drivers/bluetooth/hci_qca.c
-@@ -1846,6 +1846,17 @@ static const struct qca_device_data qca_soc_data_wcn3991 = {
+@@ -243,7 +243,11 @@ static enum qca_btsoc_type qca_soc_type(struct hci_uart *hu)
+ 
+ 		soc_type = qsd->btsoc_type;
+ 	} else {
+-		soc_type = QCA_ROME;
++		/* dace bring-up: el BT se arranca por la ruta LDISC
++		 * (btattach) y este kernel solo corre en el T5, cuyo chip es
++		 * un WCN3988. Sin esto se asume QCA_ROME y el firmware
++		 * "ap" (apbtfw/apnv) no se encuentra. */
++		soc_type = QCA_WCN3988;
+ 	}
+ 
+ 	return soc_type;
+@@ -1846,6 +1850,17 @@ static const struct qca_device_data qca_soc_data_wcn3991 = {
  	.capabilities = QCA_CAP_WIDEBAND_SPEECH | QCA_CAP_VALID_LE_STATES,
  };
  
@@ -93,7 +107,7 @@ index 56b4b7248..be1da1685 100644
  static const struct qca_device_data qca_soc_data_wcn3998 = {
  	.soc_type = QCA_WCN3998,
  	.vregs = (struct qca_vreg []) {
-@@ -2327,6 +2338,7 @@ static const struct of_device_id qca_bluetooth_of_match[] = {
+@@ -2327,6 +2342,7 @@ static const struct of_device_id qca_bluetooth_of_match[] = {
  	{ .compatible = "qcom,qca6174-bt" },
  	{ .compatible = "qcom,qca6390-bt", .data = &qca_soc_data_qca6390},
  	{ .compatible = "qcom,qca9377-bt" },
