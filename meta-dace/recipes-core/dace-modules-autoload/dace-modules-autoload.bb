@@ -15,8 +15,22 @@ LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 COMPATIBLE_MACHINE = "dace"
 
+# 18-09-2026: la lista ya NO va comentada. Se comprobo que kmod aplica el
+# blacklist como *deny-list* tambien al `modprobe` de systemd-modules-load
+# ("Module 'wlan' is deny-listed (by kmod)"), por lo que ese servicio no
+# sirve para cargar la cadena. La mete a mano dace-modules-load.service, que
+# hace `modprobe` explicito (eso SI ignora la deny-list) leyendo el mismo
+# /etc/modules-load.d/dace-post-rootfs.conf.
+inherit systemd
+
 SRC_URI = "file://dace-post-rootfs.conf \
-           file://dace-vendor-blacklist.conf"
+           file://dace-vendor-blacklist.conf \
+           file://dace-modules-load.sh \
+           file://dace-modules-load.service"
+
+SYSTEMD_PACKAGES = "${PN}"
+SYSTEMD_SERVICE:${PN} = "dace-modules-load.service"
+SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 do_install() {
     install -d -m 0755 ${D}${sysconfdir}/modules-load.d
@@ -25,9 +39,16 @@ do_install() {
     # bloquean con modprobe.d (ver el comentario del propio fichero).
     install -d -m 0755 ${D}${sysconfdir}/modprobe.d
     install -m 0644 ${UNPACKDIR}/dace-vendor-blacklist.conf ${D}${sysconfdir}/modprobe.d/00-dace-vendor-blacklist.conf
+    # Carga explicita (la deny-list del blacklist bloquea a systemd-modules-load).
+    install -d -m 0755 ${D}${libexecdir}
+    install -m 0755 ${UNPACKDIR}/dace-modules-load.sh ${D}${libexecdir}/dace-modules-load.sh
+    install -d -m 0755 ${D}${systemd_system_unitdir}
+    install -m 0644 ${UNPACKDIR}/dace-modules-load.service ${D}${systemd_system_unitdir}/dace-modules-load.service
 }
 
 FILES:${PN} = "${sysconfdir}/modules-load.d/dace-post-rootfs.conf \
-               ${sysconfdir}/modprobe.d/00-dace-vendor-blacklist.conf"
+               ${sysconfdir}/modprobe.d/00-dace-vendor-blacklist.conf \
+               ${libexecdir}/dace-modules-load.sh \
+               ${systemd_system_unitdir}/dace-modules-load.service"
 
 RDEPENDS:${PN} = "linux-dace-modules"

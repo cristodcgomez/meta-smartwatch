@@ -1,0 +1,17 @@
+[Unit]
+Description=dace: carga explicita de la cadena vendor (WLAN/BT/ASoC)
+Documentation=file:/etc/modules-load.d/dace-post-rootfs.conf
+DefaultDependencies=no
+After=local-fs.target systemd-modules-load.service
+Before=dace-lxc-android.service dace-lxc-hal-start.service
+ConditionPathExists=/etc/modules-load.d/dace-post-rootfs.conf
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/dace-modules-load.sh
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=local-fs.target
