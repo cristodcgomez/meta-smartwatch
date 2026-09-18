@@ -17,6 +17,9 @@ CONF=/etc/modules-load.d/dace-post-rootfs.conf
 
 # Dependencias que viven en el initramfs pero que por orden pueden no estar
 # (cfg80211 lo arrastra wlan por dep, no hace falta forzarlo).
+# OJO: algun modprobe se queda BLOQUEADO (visto con pmw5100-spmi_dlkm, que no
+# tiene device en este DT): sin timeout el servicio se queda en 'activating'
+# para siempre. timeout evita ese cuelgue (TMOUT no aplica a modprobe).
 rc=0
 while IFS= read -r line; do
     case "$line" in
@@ -26,10 +29,10 @@ while IFS= read -r line; do
     mod=${line%%#*}
     mod=$(echo "$mod" | tr -d ' \t')
     [ -n "$mod" ] || continue
-    if modprobe "$mod" 2>/dev/null; then
+    if timeout 20 modprobe "$mod" 2>/dev/null; then
         echo "dace-modules-load: $mod OK"
     else
-        echo "dace-modules-load: $mod FAIL"
+        echo "dace-modules-load: $mod FAIL (o timeout)"
         rc=1
     fi
 done < "$CONF"
