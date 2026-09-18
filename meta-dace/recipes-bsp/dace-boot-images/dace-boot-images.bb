@@ -168,6 +168,9 @@ do_compile() {
     FDTPUT=$(find ${STAGING_BINDIR_NATIVE} -name fdtput 2>/dev/null | head -1)
     [ -n "$FDTPUT" ] || FDTPUT=$(command -v fdtput)
     test -n "$FDTPUT" || bbfatal "fdtput no encontrado (dtc-native)"
+    FDTGET=$(find ${STAGING_BINDIR_NATIVE} -name fdtget 2>/dev/null | head -1)
+    [ -n "$FDTGET" ] || FDTGET=$(command -v fdtget)
+    test -n "$FDTGET" || bbfatal "fdtget no encontrado (dtc-native)"
     FDTOVERLAY="${STAGING_BINDIR_NATIVE}/fdtoverlay"
     test -n "$FDTOVERLAY" || bbfatal "fdtoverlay no encontrado (dtc-native)"
     for dtb in monaco-real monacop; do
@@ -271,6 +274,20 @@ do_compile() {
             qcom,bt-vdd-pa-supply 0x84
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
             qcom,bt-vdd-xtal-supply 0x131
+        # ── BT UART: pinctrl SIEMPRE en qup05 ──────────────────────
+        # El driver del HS UART solo muxea los pines a qup05 en
+        # msm_geni_serial_runtime_resume() -> resources_on(). En este
+        # device el runtime PM se queda "active" sin llamar al callback (o
+        # autosuspende a "sleep"), asi que los pines 26-29 se quedan en
+        # function=gpio y el UART NO saca datos (el chip parece mudo:
+        # hci0 TX ok pero RX 0). Copiamos los grupos del estado "active"
+        # (qup05) a "default" y "sleep" para que el muxeo no dependa del PM.
+        # (fdtget lee los phandles reales del propio dtb, no se hardcodean.)
+        UART="/soc/qcom,qupv3_0_geni_se@4ac0000/qcom,qup_uart@4a94000"
+        BT_PIN_ACTIVE=$("$FDTGET" -t x ${WORKDIR}/${dtb}-per.dtb "$UART" pinctrl-1)
+        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb "$UART" pinctrl-0 $BT_PIN_ACTIVE
+        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb "$UART" pinctrl-2 $BT_PIN_ACTIVE
+        bbnote "$dtb: BT UART pinctrl-0/2 = pinctrl-1 (qup05): $BT_PIN_ACTIVE"
         bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, sin OPP) + RAYDIUM rm32380 @0x39 (i2c-1) + zinitix disabled + BT rieles"
     done
     cat ${WORKDIR}/monaco-real-per.dtb ${WORKDIR}/monacop-per.dtb > ${WORKDIR}/dtb-blob-vendor.bin
