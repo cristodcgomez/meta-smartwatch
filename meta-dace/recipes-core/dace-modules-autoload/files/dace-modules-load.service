@@ -9,6 +9,7 @@ ConditionPathExists=/etc/modules-load.d/dace-post-rootfs.conf
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+TimeoutStartSec=120
 ExecStart=/usr/libexec/dace-modules-load.sh
 StandardOutput=journal+console
 StandardError=journal+console

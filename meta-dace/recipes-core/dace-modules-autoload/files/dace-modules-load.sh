@@ -29,7 +29,7 @@ while IFS= read -r line; do
     mod=${line%%#*}
     mod=$(echo "$mod" | tr -d ' \t')
     [ -n "$mod" ] || continue
-    if timeout 20 modprobe "$mod" 2>/dev/null; then
+    if timeout 8 modprobe "$mod" 2>/dev/null; then
         echo "dace-modules-load: $mod OK"
     else
         echo "dace-modules-load: $mod FAIL (o timeout)"
@@ -37,4 +37,8 @@ while IFS= read -r line; do
     fi
 done < "$CONF"
 
-exit $rc
+# Best-effort: un modulo que falle (p.ej. google_wlan_mac, que necesita el nodo
+# /chosen/config del bootloader de Google) NO debe marcar el servicio como
+# 'failed'. Los demas ya se han cargado.
+[ "$rc" = 1 ] && echo "dace-modules-load: algun modulo fallo (ver arriba); sigo"
+exit 0
