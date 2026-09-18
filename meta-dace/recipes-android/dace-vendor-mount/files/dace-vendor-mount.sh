@@ -112,6 +112,24 @@ if [ -f /vendor/firmware_mnt/image/modem.mdt ]; then
     echo /vendor/firmware_mnt/image > /sys/module/firmware_class/parameters/path && \
         echo "dace-vendor-mount: firmware_class.path -> /vendor/firmware_mnt/image"
 fi
+# ─ Arrancar el ADSP ANTES del modem ──────────────────────────────
+# El fw del modem espera al ADSP vivo vía tmr_slave2; sin ADSP el watchdog del
+# modem cuelga con "DOG detects stalled initialization" y se resetea en bucle
+# (justo lo que nos pasaba). OJO: monaco_adsp_resource NO tiene .auto_boot, así
+# que el ADSP no arranca solo: hay que escribir en /sys/kernel/boot_adsp/boot
+# (sysfs que crea adsp_loader_dlkm). El contenedor también lo hace (la línea
+# boot_adsp de init.qti.kernel.rc), pero TARDE (dace-lxc-android va después de
+# este servicio), así que lo adelantamos aquí y esperamos a que esté running.
+if [ -e /sys/kernel/boot_adsp/boot ] && \
+   [ "$(cat /sys/class/remoteproc/remoteproc0/state 2>/dev/null)" != "running" ]; then
+    echo 1 > /sys/kernel/boot_adsp/boot 2>/dev/null || true
+    i=0
+    while [ $i -lt 75 ] && \
+          [ "$(cat /sys/class/remoteproc/remoteproc0/state 2>/dev/null)" != "running" ]; do
+        sleep 0.2; i=$((i+1))
+    done
+    echo "dace-vendor-mount: ADSP (remoteproc0) state=$(cat /sys/class/remoteproc/remoteproc0/state 2>/dev/null)"
+fi
 # Arrancar el modem (remoteproc1) si sigue offline, ya con el firmware visible.
 if [ -d /sys/class/remoteproc/remoteproc1 ] && \
    [ "$(cat /sys/class/remoteproc/remoteproc1/state 2>/dev/null)" = "offline" ]; then
