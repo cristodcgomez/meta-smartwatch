@@ -96,4 +96,27 @@ fi
 [ -L /vendor ] || { rm -rf /vendor 2>/dev/null; ln -sf /android/vendor /vendor; }
 [ -L /system ] || { rm -rf /system 2>/dev/null; ln -sf /var/lib/lxc/android/rootfs/system /system; }
 
+# ─ Firmware del modem/WLAN (como aurora) ────────────────────────────────
+# El firmware del subsystem modem (modem.mdt + modem.b00..b29), el del WLAN
+# (wlanmdsp.mbn) y los BDF (bdwlan.*) viven en /vendor/firmware_mnt/image, pero
+# firmware_class.path por defecto apunta a /vendor/firmware (que no llega ahi).
+# Sin el path, remoteproc-mss no encuentra modem.mdt (ENOENT) y queda offline,
+# lo que rompe WLAN (icnss espera el WLFW del modem) y BT (la init del QCA SoC
+# necesita el blob del modem). Aurora lo hace asi en su aurora-vendor-mount.sh.
+if [ -b /dev/mmcblk0p14 ] && ! mountpoint -q /vendor/firmware_mnt 2>/dev/null; then
+    mkdir -p /vendor/firmware_mnt 2>/dev/null || true
+    mount -t vfat -o ro,uid=1000,gid=1000,fmask=0337,dmask=0227 \
+        /dev/mmcblk0p14 /vendor/firmware_mnt 2>/dev/null || true
+fi
+if [ -f /vendor/firmware_mnt/image/modem.mdt ]; then
+    echo /vendor/firmware_mnt/image > /sys/module/firmware_class/parameters/path && \
+        echo "dace-vendor-mount: firmware_class.path -> /vendor/firmware_mnt/image"
+fi
+# Arrancar el modem (remoteproc1) si sigue offline, ya con el firmware visible.
+if [ -d /sys/class/remoteproc/remoteproc1 ] && \
+   [ "$(cat /sys/class/remoteproc/remoteproc1/state 2>/dev/null)" = "offline" ]; then
+    echo start > /sys/class/remoteproc/remoteproc1/state 2>/dev/null && \
+        echo "dace-vendor-mount: kicked remoteproc-mss (modem)" || true
+fi
+
 echo "dace-vendor-mount: OK"
