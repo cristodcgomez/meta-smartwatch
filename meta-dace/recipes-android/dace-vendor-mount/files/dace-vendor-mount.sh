@@ -112,6 +112,16 @@ if [ -f /vendor/firmware_mnt/image/modem.mdt ]; then
     echo /vendor/firmware_mnt/image > /sys/module/firmware_class/parameters/path && \
         echo "dace-vendor-mount: firmware_class.path -> /vendor/firmware_mnt/image"
 fi
+# Este servicio corre muy pronto (Before=local-fs.target); el adsp_loader y los
+# nodos remoteproc pueden aparecer despues. Esperar (max ~30 s) a que existan
+# para no saltarnos el arranque del ADSP/modem (le pasaba: adsp=mss=offline).
+i=0
+while [ $i -lt 150 ] && [ ! -e /sys/kernel/boot_adsp/boot ]; do
+    sleep 0.2; i=$((i+1))
+done
+while [ $i -lt 150 ] && [ ! -e /sys/class/remoteproc/remoteproc0 ]; do
+    sleep 0.2; i=$((i+1))
+done
 # ─ Arrancar el ADSP ANTES del modem ──────────────────────────────
 # El fw del modem espera al ADSP vivo vía tmr_slave2; sin ADSP el watchdog del
 # modem cuelga con "DOG detects stalled initialization" y se resetea en bucle
@@ -131,7 +141,16 @@ if [ -e /sys/kernel/boot_adsp/boot ] && \
     echo "dace-vendor-mount: ADSP (remoteproc0) state=$(cat /sys/class/remoteproc/remoteproc0/state 2>/dev/null)"
 fi
 # Arrancar el modem (remoteproc1) si sigue offline, ya con el firmware visible.
-if [ -d /sys/class/remoteproc/remoteproc1 ] && \
+#
+# ⚠️ GATEADO A PROPOSITO: arrancar el modem hoy dispara el DOG del firmware
+# ("DOG detects stalled initialization") a los ~40 s y RESETEA el SoC. El ADSP
+# ya arranca (arriba), pero el modem sigue cayendo: en el kernel google-eos el
+# sysmon del ADSP manda eventos SSR before/after_powerup por QMI SSCTL y el fw
+# del modem responde result=1 (el kernel STOCK de Mobvoi no tiene esa ruta:
+# su sysmon solo manda "ssr:<name>:before_shutdown"). Hasta resolver eso, no se
+# arranca el modem solo: asi el rootfs bootea estable. Para probarlo a mano:
+#   touch /etc/dace-kick-modem   (y reiniciar, o lanzar el script a mano)
+if [ -e /etc/dace-kick-modem ] && [ -d /sys/class/remoteproc/remoteproc1 ] && \
    [ "$(cat /sys/class/remoteproc/remoteproc1/state 2>/dev/null)" = "offline" ]; then
     echo start > /sys/class/remoteproc/remoteproc1/state 2>/dev/null && \
         echo "dace-vendor-mount: kicked remoteproc-mss (modem)" || true
