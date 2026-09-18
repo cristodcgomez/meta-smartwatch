@@ -251,10 +251,10 @@ do_compile() {
         # aplica a mano con fdtoverlay: el de IDP V1.0 anade al zinitix_ts@20
         # el enlace con el panel (panel = <&dsi_rm69090_amoled_cmd>), que es
         # lo que el driver del vendor usa para encender el chip.
-        if [ -f ${UNPACKDIR}/monaco-idp-v1-overlay.dtbo ]; then
+        if [ -f ${S}/static/monaco-idp-v1-overlay.dtbo ]; then
             ${FDTOVERLAY} -i ${WORKDIR}/${dtb}-per.dtb \
                 -o ${WORKDIR}/${dtb}-ovl.dtb \
-                ${UNPACKDIR}/monaco-idp-v1-overlay.dtbo \
+                ${S}/static/monaco-idp-v1-overlay.dtbo \
                 && mv ${WORKDIR}/${dtb}-ovl.dtb ${WORKDIR}/${dtb}-per.dtb \
                 && bbnote "$dtb: overlay Monaco IDP V1.0 (board 0x10022) aplicado"
         else
