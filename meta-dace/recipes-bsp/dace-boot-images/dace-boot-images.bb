@@ -251,15 +251,18 @@ do_compile() {
         else
             bbwarn "$dtb: falta monaco-idp-v1-overlay.dtbo"
         fi
-        # ── BT/WCN3988: rieles del btpower ─────────────────────────────
+        # ── BT/WCN3988: rieles del btpower ───────────────────────
         # El DTB stock trae el nodo pelado (solo compatible). Los rieles
         # reales estan en el source stock monaco-standalone-idp-v1.dtsi:
         # IO=L17A (0x184), core/RFA=L13A (0x181), PA/CH0=L26A (0x84),
         # XO=L14A (0x131). Todos RPM regulators (rpm_smd_regulator).
-        # Se anade compatible "qcom,wcn3990" para que btpower use la tabla
-        # wcn399x (io/core/pa/xtal) y no la qcc5100 (solo pa).
+        # OJO ORDEN del compatible: __of_device_is_compatible() puntua mas alto
+        # el compatible que va PRIMERO (score = INT_MAX/2 - index<<2). Con
+        # "qcom,qcc5100" primero, btpower usaba la tabla qcc5100 (SOLO pa) y
+        # dejaba io/core APAGADOS (chip mudo). Poniendo "qcom,wcn3990" primero
+        # usa la tabla wcn399x (io/core/pa/xtal).
         "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
-            compatible "qcom,qcc5100" "qcom,wcn3990"
+            compatible "qcom,wcn3990" "qcom,qcc5100"
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
             qcom,bt-vdd-io-supply 0x184
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
