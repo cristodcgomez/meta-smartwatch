@@ -122,38 +122,58 @@ done
 while [ $i -lt 150 ] && [ ! -e /sys/class/remoteproc/remoteproc0 ]; do
     sleep 0.2; i=$((i+1))
 done
-# ─ Arrancar el ADSP ANTES del modem ──────────────────────────────
-# El fw del modem espera al ADSP vivo vía tmr_slave2; sin ADSP el watchdog del
-# modem cuelga con "DOG detects stalled initialization" y se resetea en bucle
-# (justo lo que nos pasaba). OJO: monaco_adsp_resource NO tiene .auto_boot, así
-# que el ADSP no arranca solo: hay que escribir en /sys/kernel/boot_adsp/boot
-# (sysfs que crea adsp_loader_dlkm). El contenedor también lo hace (la línea
-# boot_adsp de init.qti.kernel.rc), pero TARDE (dace-lxc-android va después de
-# este servicio), así que lo adelantamos aquí y esperamos a que esté running.
+while [ $i -lt 150 ] && [ ! -e /sys/class/remoteproc/remoteproc1 ]; do
+    sleep 0.2; i=$((i+1))
+done
+
+# ─ ORDEN DE AURORA: primero el MODEM, luego el ADSP ──────────────────────────
+# El aurora-vendor-mount.sh de aurora hace exactamente esto: monta el firmware,
+# fija firmware_class.path y escribe `start` en remoteproc1 (modem). El ADSP lo
+# arranca despues el contenedor (linea boot_adsp de init.qti.kernel.rc). Aqui
+# dejamos a mano el orden inverso para probarlo: el modem primero (con el
+# firmware ya visible) y el ADSP inmediatamente despues (para que llegue dentro
+# de la ventana de ~40 s antes del DOG del fw del modem, que espera al ADSP via
+# tmr_slave2). GATEADO tras /etc/dace-kick-modem para que un rootfs recien
+# flasheado bootee estable (arrancar el modem hoy puede resetear el SoC).
+if [ -e /etc/dace-kick-modem ] && \
+   [ "$(cat /sys/class/remoteproc/remoteproc1/state 2>/dev/null)" = "offline" ]; then
+    echo start > /sys/class/remoteproc/remoteproc1/state 2>/dev/null && \
+        echo "dace-vendor-mount: kicked remoteproc-mss (modem) FIRST (aurora order)" > /dev/kmsg || true
+    i=0
+    while [ $i -lt 25 ] && \
+          [ "$(cat /sys/class/remoteproc/remoteproc1/state 2>/dev/null)" = "offline" ]; do
+        sleep 0.2; i=$((i+1))
+    done
+    echo "dace-vendor-mount: mss state=$(cat /sys/class/remoteproc/remoteproc1/state 2>/dev/null)" > /dev/kmsg || true
+fi
+
+# ─ Arrancar el ADSP (despues del modem, orden aurora) ────────────────────────
+# El fw del modem espera al ADSP vivo via tmr_slave2; sin ADSP el watchdog del
+# modem cuelga con "DOG detects stalled initialization" y se resetea en bucle.
+# OJO: monaco_adsp_resource NO tiene .auto_boot, asi que el ADSP no arranca
+# solo: hay que escribir en /sys/kernel/boot_adsp/boot (sysfs que crea
+# adsp_loader_dlkm). El contenedor tambien lo hace, pero TARDE.
 if [ -e /sys/kernel/boot_adsp/boot ] && \
    [ "$(cat /sys/class/remoteproc/remoteproc0/state 2>/dev/null)" != "running" ]; then
     echo 1 > /sys/kernel/boot_adsp/boot 2>/dev/null || true
     i=0
-    while [ $i -lt 75 ] && \
+    while [ $i -lt 100 ] && \
           [ "$(cat /sys/class/remoteproc/remoteproc0/state 2>/dev/null)" != "running" ]; do
         sleep 0.2; i=$((i+1))
     done
-    echo "dace-vendor-mount: ADSP (remoteproc0) state=$(cat /sys/class/remoteproc/remoteproc0/state 2>/dev/null)"
+    echo "dace-vendor-mount: ADSP (remoteproc0) state=$(cat /sys/class/remoteproc/remoteproc0/state 2>/dev/null)" > /dev/kmsg || true
 fi
-# Arrancar el modem (remoteproc1) si sigue offline, ya con el firmware visible.
-#
-# ⚠️ GATEADO A PROPOSITO: arrancar el modem hoy dispara el DOG del firmware
-# ("DOG detects stalled initialization") a los ~40 s y RESETEA el SoC. El ADSP
-# ya arranca (arriba), pero el modem sigue cayendo: en el kernel google-eos el
-# sysmon del ADSP manda eventos SSR before/after_powerup por QMI SSCTL y el fw
-# del modem responde result=1 (el kernel STOCK de Mobvoi no tiene esa ruta:
-# su sysmon solo manda "ssr:<name>:before_shutdown"). Hasta resolver eso, no se
-# arranca el modem solo: asi el rootfs bootea estable. Para probarlo a mano:
-#   touch /etc/dace-kick-modem   (y reiniciar, o lanzar el script a mano)
-if [ -e /etc/dace-kick-modem ] && [ -d /sys/class/remoteproc/remoteproc1 ] && \
-   [ "$(cat /sys/class/remoteproc/remoteproc1/state 2>/dev/null)" = "offline" ]; then
-    echo start > /sys/class/remoteproc/remoteproc1/state 2>/dev/null && \
-        echo "dace-vendor-mount: kicked remoteproc-mss (modem)" || true
-fi
+
+# Vigia: durante 90 s registra en /dev/kmsg el estado de adsp/mss cada 5 s.
+# Asi el stall del modem (DOG a los ~40 s) queda fechado en la consola aunque
+# el journal se pierda en el reset.
+(
+    i=0
+    while [ $i -lt 18 ]; do
+        sleep 5; i=$((i+1))
+        echo "dace-vendor-mount: WATCH t=$((i*5))s adsp=$(cat /sys/class/remoteproc/remoteproc0/state 2>/dev/null) mss=$(cat /sys/class/remoteproc/remoteproc1/state 2>/dev/null)" > /dev/kmsg || true
+    done
+) &
+
 
 echo "dace-vendor-mount: OK"
