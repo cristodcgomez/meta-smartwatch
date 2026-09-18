@@ -1,0 +1,41 @@
+From: TicWatch Pro 5 (dace) port
+Subject: [PATCH] tty: msm_geni_serial: forzar FIFO en el HS UART del BT
+
+El wrapper QUP @4ac0000 no tiene dominio IOMMU (es built-in y el apps-smmu es
+modulo; of_iommu_configure() no se reintenta) y el SE-DMA del HS UART se lleva
+un RX_SBE (bus error) en el primer open() -> reset duro del SoC. Con gsi_mode=0
+y FIFO NO deshabilitado, forzamos GENI_SE_FIFO para el HS UART no-consola (el
+BT): usa PIO del CPU, sin DMA, y evita el bus error. Parche del bring-up dace.
+
+Upstream-Status: Inappropriate [dace bring-up]
+---
+diff --git a/drivers/tty/serial/msm_geni_serial.c b/drivers/tty/serial/msm_geni_serial.c
+index 0d32f2595297..3ccbc40b9e37 100644
+--- a/drivers/tty/serial/msm_geni_serial.c
++++ b/drivers/tty/serial/msm_geni_serial.c
+@@ -37,6 +37,16 @@
+ 
+ static bool con_enabled = IS_ENABLED(CONFIG_SERIAL_MSM_GENI_CONSOLE_DEFAULT_ENABLED);
+ 
++/*
++ * dace (TicWatch Pro 5): forzar FIFO en el HS UART. El wrapper QUP no tiene
++ * dominio IOMMU (es built-in y el apps-smmu es modulo) y su SE-DMA se lleva un
++ * RX_SBE (bus error) al primer open -> reset duro. FIFO usa PIO del CPU (sin
++ * DMA) y evita el problema. Solo afecta al HS UART no-consola (el BT).
++ */
++static bool dace_hs_uart_fifo = true;
++module_param(dace_hs_uart_fifo, bool, 0644);
++MODULE_PARM_DESC(dace_hs_uart_fifo, "Force FIFO mode for HS UART (avoid QUP SE-DMA)");
++
+ /* UART specific GENI registers */
+ #define SE_UART_LOOPBACK_CFG		(0x22C)
+ #define SE_GENI_CFG_REG80		(0x240)
+@@ -3573,7 +3583,7 @@ static int msm_geni_serial_port_setup(struct uart_port *uport)
+ 	geni_write_reg(rxstale, uport->membase, SE_UART_RX_STALE_CNT);
+ 	if (msm_port->gsi_mode) {
+ 		msm_port->xfer_mode = GENI_GPI_DMA;
+-	} else if (!uart_console(uport)) {
++	} else if (!uart_console(uport) && !dace_hs_uart_fifo) {
+ 		/* For now only assume FIFO mode. */
+ 		msm_port->xfer_mode = GENI_SE_DMA;
+ 		/* TX packing */
