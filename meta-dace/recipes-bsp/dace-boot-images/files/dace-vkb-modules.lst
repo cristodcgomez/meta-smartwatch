@@ -93,7 +93,7 @@ qcom-apcs-ipc-mailbox:k
 # failure is upstream of the GPIO step).
 msm_qmp:k
 qcom_hwspinlock:k
-rproc_qcom_common:k
+rproc_qcom_common:stock
 qcom_glink:k
 qcom_glink_rpm:k
 rpm-smd:k
@@ -190,11 +190,24 @@ msm_geni_serial:k
 qcom_aoss:k
 qmi_helpers:k
 smp2p_sleepstate:k
-qcom_ramdump:k
+# ── STOCK (Mobvoi): pila remoteproc/sysmon/q6v5 ────────────────────────────
+# Usamos los .ko PREBUILT DEL STOCK (ota-stock/extracted/modules-stripped) en
+# vez de los que compila nuestro kernel a partir de google-eos. Motivo: con el
+# driver de google-eos el fw del modem se queda colgado 40 s y salta
+#   dog_hal_common.c:173: DOG detects stalled initialization
+# mientras que el kernel stock arranca este mismo modem, con este mismo DT y
+# este mismo firmware. El stock qcom_q6v5_pas.ko es el driver REAL de monaco
+# (trae monaco_adsp_resource / monaco_modem_resource y los compatibles
+# qcom,monaco-{adsp,modem}-pas) y su vermagic es identico al nuestro
+# (5.15.144-g7f9d6c16b5cd-ab151), asi que se puede mezclar (el ensamblador
+# salta el gate KMI con CONFIG_MODULE_FORCE_LOAD). Se sustituye la pila ENTERA
+# para que los structs compartidos (struct qcom_q6v5, struct qcom_sysmon) sean
+# los del stock.
+qcom_ramdump:stock
 pdr_interface:k
-qcom_pil_info:k
-qcom_sysmon:k
-qcom_q6v5:k
+qcom_pil_info:stock
+qcom_sysmon:stock
+qcom_q6v5:stock
 
 # ────────────────── SoC infra modem fw expects up before it boots ──────────────────
 msm_sharedmem:k
@@ -230,7 +243,7 @@ cdsp-loader:k
 
 # ────────────────── Modem PAS LAST (auto-boots remoteproc on probe) ──────────────────
 # All infra above must be ready first.
-qcom_q6v5_pas:k
+qcom_q6v5_pas:stock
 qrtr-smd:k
 
 # ────────────────── WLAN platform (techpack wlan-platform + cfg80211 + qcacld) ──────────────────

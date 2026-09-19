@@ -33,6 +33,12 @@ SRC_URI = "\
     file://static/monacop.dtb \
     file://static/monaco-idp-v1-overlay.dtbo \
     file://static/stock/qti-qbg-main.ko \
+    file://static/stock/qcom_q6v5_pas.ko \
+    file://static/stock/qcom_q6v5.ko \
+    file://static/stock/qcom_sysmon.ko \
+    file://static/stock/qcom_pil_info.ko \
+    file://static/stock/qcom_ramdump.ko \
+    file://static/stock/rproc_qcom_common.ko \
 "
 S = "${UNPACKDIR}"
 
