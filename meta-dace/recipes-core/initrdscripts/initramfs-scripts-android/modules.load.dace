@@ -11,7 +11,9 @@ clk-smd-rpm.ko
 dispcc-monaco.ko
 gcc-monaco.ko
 gpucc-monaco.ko
-msm_gpi.ko
+# msm_gpi.ko NO aqui: el GPI-DMA (4a00000.qcom,gpi-dma, iommus=<&apps_smmu 0xf6>)
+# tiene que probe-arse DESPUES de que el apps-smmu este registrado, si no
+# se queda SIN dominio IOMMU (ver el bloque "QUP/GPI" mas abajo, tras qnoc).
 mdt_loader.ko
 smem.ko
 smp2p.ko
@@ -61,9 +63,8 @@ phy-msm-snps-hs.ko
 dwc3-msm.ko
 qpnp-power-on.ko
 rtc-pm8xxx.ko
-i2c-msm-geni.ko
-spi-msm-geni.ko
-msm_geni_serial.ko
+# (los tres drivers geni del QUP estan MAS ABAJO, tras qnoc-monaco: ver el
+#  bloque "QUP/GPI: dominio IOMMU")
 # qcom-hv-haptics.ko (PMIC haptics, carried over from the stock load list) is
 # deliberately absent: dace's haptics is the cs40l26 i2c amp loaded below,
 # and the PMIC HV-haptics driver was never part of our module set.
@@ -103,6 +104,25 @@ nvmem_qcom-spmi-sdam.ko
 qnoc-monaco.ko
 icc-rpm.ko
 qnoc-qos-rpm.ko
+# ── QUP/GPI: dominio IOMMU (fix del reset del SPI del slate) ──────────────
+# CADA UNO de estos devices lleva "iommus = <&apps_smmu 0xe3/0xf6 ...>" en el
+# DT, pero el apps-smmu (arm_smmu.ko) NO puede probear hasta que qnoc-monaco
+# registra el proveedor ICC. Si su driver carga antes, en el probe
+# of_iommu_xlate() no encuentra las ops del IOMMU y llama a
+# driver_deferred_probe_check_state(): como los modulos se cargan DESPUES de
+# los initcalls del kernel, eso devuelve -ETIMEDOUT ("deferred probe timeout,
+# ignoring dependency") en vez de -EPROBE_DEFER -> of_iommu_configure() lo trata
+# como "sin IOMMU" y el device se queda SIN iommu_group ni dominio.
+# Sintoma medido: dma_map_single() devuelve la direccion FISICA mientras el
+# SMMU sigue traduciendo ese stream (SMR del firmware) -> el motor GSI/GPI da
+# "Unhandled interrupt status:0x40" + spi_gsi_ch_cb status 2 y el SoC resetea
+# en duro. Visto en: 4a90000.spi (slate) y 4a94000.qcom,qup_uart (BT).
+# Con el orden correcto el device recibe grupo+dominio en su propio probe y el
+# DMA usa IOVAs traducidas por el SMMU (el GPI deja de petar).
+msm_gpi.ko
+i2c-msm-geni.ko
+spi-msm-geni.ko
+msm_geni_serial.ko
 qrtr.ko
 # qrtr-smd bridges the qrtr bus onto SMD/glink so ADSP services (audio APM/PDR,
 # WLFW) become reachable; without it the monaco sound card never goes ONLINE.

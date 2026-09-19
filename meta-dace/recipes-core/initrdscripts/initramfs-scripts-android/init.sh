@@ -111,8 +111,19 @@ while read mod; do
     # la consola USB: msm_smmu_probe() (driver de smmu_sde_unsec_cb, dentro de
     # msm_drm.ko) exige que el apps-smmu ya este para obtener dominio IOMMU, y
     # queremos la consola capturando el arranque del display.
+    # msm_gpi / i2c-msm-geni / spi-msm-geni: MISMO motivo. El wrapper QUP
+    # (4ac0000, iommus=<&apps_smmu 0xe3>, qcom,iommu-dma="fastmap") es quien
+    # mapea los buffers: geni_se_tx_dma_prep() hace
+    # dma_map_single(wrapper->dev, ...). Si su driver (geni_se_qup) o los de sus
+    # hijos (i2c/spi/uart) probean ANTES de que el apps-smmu este registrado,
+    # of_iommu_xlate() no encuentra las ops y driver_deferred_probe_check_state()
+    # devuelve -ETIMEDOUT (los modulos cargan tras los initcalls) -> el device
+    # se queda SIN iommu_group/dominio -> dma_map_single() devuelve la direccion
+    # FISICA sin tocar el context bank -> el motor GPI/GSI (0xf6) revienta
+    # ("Unhandled interrupt status:0x40", spi_gsi_ch_cb status 2) y el SoC
+    # resetea. Medido en vivo: 4ac0000/4a90000/4a00000/4a94000 SIN iommu_group.
     case "$name" in
-        qnoc-monaco|msm_drm|msm_kgsl|msm_geni_serial)
+        qnoc-monaco|msm_drm|msm_kgsl|msm_geni_serial|msm_gpi|i2c-msm-geni|spi-msm-geni)
             info "M-- ${name} (diferido al arranque del display)"
             continue ;;
     esac
@@ -143,11 +154,28 @@ setup_usb_console
 sleep 2
 info "DISPLAY: consola arriba, cargando qnoc-monaco"
 modprobe qnoc-monaco 2>/dev/kmsg ; info "DISPLAY: qnoc-monaco rc=$?"
+# ── QUP/GPI: dominio IOMMU del apps-smmu (fix del reset del SPI del slate) ──
+# qnoc-monaco registra el proveedor ICC y DESBLOQUEA el probe del apps-smmu
+# (arm_smmu.ko, que esta diferido hasta este momento). A partir de aqui los
+# devices con "iommus" del QUP ya pueden obtener su iommu_group + dominio
+# fastmap en su propio probe. El GPI primero (es el motor DMA que usan los
+# SE en modo GSI: los drivers geni piden sus canales con dma_request_chan).
+modprobe msm_gpi 2>/dev/kmsg      ; info "DISPLAY: msm_gpi rc=$?"
+modprobe i2c-msm-geni 2>/dev/kmsg ; info "DISPLAY: i2c-msm-geni rc=$?"
+modprobe spi-msm-geni 2>/dev/kmsg ; info "DISPLAY: spi-msm-geni rc=$?"
 # msm_geni_serial DESPUES del qnoc: su geni_icc_get("qup-config") debe ver los
 # nodos del qnoc ya registrados. Si no, of_icc_get devuelve -EINVAL (provider
 # arriba pero nodo aun no) y el probe del UART FALLA sin reintento -> no aparece
-# /dev/ttyHS0 (BT). Los i2c/spi se salvaban por timing (defer + retry).
+# /dev/ttyHS0 (BT).
 modprobe msm_geni_serial 2>/dev/kmsg ; info "DISPLAY: msm_geni_serial rc=$?"
+# Comprobacion del fix: los cuatro deben tener iommu_group.
+for _d in 4ac0000.qcom,qupv3_0_geni_se 4a90000.spi 4a00000.qcom,gpi-dma 4a94000.qcom,qup_uart; do
+    if [ -e /sys/bus/platform/devices/$_d/iommu_group ]; then
+        info "IOMMU: $_d CON grupo ($(readlink /sys/bus/platform/devices/$_d/iommu_group))"
+    else
+        info "IOMMU: $_d SIN grupo (el fix de orden no ha funcionado)"
+    fi
+done
 modprobe msm_drm 2>/dev/kmsg     ; info "DISPLAY: msm_drm rc=$?"
 modprobe msm_kgsl 2>/dev/kmsg    ; info "DISPLAY: msm_kgsl rc=$?"
 info "DISPLAY: fin de la carga (si sigues viendo esto, no hubo reset)"

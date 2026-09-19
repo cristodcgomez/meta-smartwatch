@@ -325,6 +325,20 @@ do_compile() {
     # rootfs solo) hay que QUITARLO de aqui. Tiene que ir en el vendor_cmdline:
     # se probo en el bootconfig del vendor_boot y NO llega a /proc/cmdline.
     # blob de 2 DTBs. Sin el monacop el ABL cae a EDL.
+    #
+    # deferred_probe_timeout=30: IMPRESCINDIBLE para el IOMMU de los devices del
+    # QUP (ver el bloque "QUP/GPI: dominio IOMMU" de init.sh). El kernel, cuando
+    # un driver built-in consume un IOMMU que aun no esta registrado DESPUES de
+    # los initcalls, llama a driver_deferred_probe_check_state(): con el timeout
+    # a 0 (defecto) eso devuelve -ETIMEDOUT -> of_iommu_configure() lo interpreta
+    # como "sin IOMMU" y el device se queda SIN dominio. Es el caso del wrapper
+    # QUP (qcom,qupv3_0_geni_se@4ac0000, CONFIG_QCOM_GENI_SE=y -> driver
+    # built-in): con las dma_ops vacias dma_map_single() devolvia la direccion
+    # FISICA (la usan geni_se_tx/rx_dma_prep y spi_map_buf via ctlr->dev.parent)
+    # mientras el SMMU seguia traduciendo ese stream -> el motor GPI/GSI del SPI
+    # del slate daba "Unhandled interrupt status:0x40" y el SoC resetaba. Con el
+    # timeout >0 el kernel devuelve -EPROBE_DEFER y el wrapper espera al
+    # apps-smmu (que necesita qnoc-monaco, cargado desde el initramfs).
     "${MKBOOTIMG}" \
         --header_version 4 --pagesize ${MKBOOTIMG_PAGESIZE} \
         --vendor_boot ${WORKDIR}/vendor_kernel_boot.img \
@@ -336,7 +350,7 @@ do_compile() {
         --ramdisk_offset ${MKBOOTIMG_RAMDISK_OFFSET} \
         --tags_offset ${MKBOOTIMG_TAGS_OFFSET} \
         --dtb_offset ${MKBOOTIMG_DTB_OFFSET} \
-        --vendor_cmdline 'lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=noforce kpti=off cgroup.memory=nokmem,nosocket loop.max_part=7 bootconfig qcom_geni_serial.con_enabled=0 androidboot.hardware=dace bootconfig buildvariant=user fw_devlink=permissive dace.debug=1'
+        --vendor_cmdline 'lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=noforce kpti=off cgroup.memory=nokmem,nosocket loop.max_part=7 bootconfig qcom_geni_serial.con_enabled=0 androidboot.hardware=dace bootconfig buildvariant=user fw_devlink=permissive deferred_probe_timeout=30 dace.debug=1'
 
     # ─── Step 6: mkbootimg boot.img (v4): our kernel + empty ramdisk ───
     if [ ! -f "${LINUX_DACE_KIMG}" ]; then
