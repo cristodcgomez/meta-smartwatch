@@ -274,6 +274,17 @@ do_compile() {
             qcom,bt-vdd-pa-supply 0x84
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
             qcom,bt-vdd-xtal-supply 0x131
+        # ─ BT reset/enable: qcom,bt-sw-ctrl-gpio ────────────────────────────
+        # El stock lo trae pero COMENTADO (monaco-standalone-idp-v1.dtsi:
+        # //qcom,bt-sw-ctrl-gpio = <&tlmm 69 GPIO_ACTIVE_HIGH>). El HAL pide
+        # BT_CMD_CHECK_SW_CTRL y btpower no tiene el gpio -> EINVAL
+        # ('CheckSwCtrl: ioctl failed'). Se a~nade como en el resto de targets
+        # Qualcomm (tlmm 69 high). El phandle del controlador se lee del propio
+        # dtb (aqui es 0x69, no se hardcodea).
+        TLMM=$("$FDTGET" -t x ${WORKDIR}/${dtb}-per.dtb /soc/pinctrl@500000 phandle)
+        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
+            qcom,bt-sw-ctrl-gpio "$TLMM" 69 0
+        bbnote "$dtb: bt-sw-ctrl-gpio = <&tlmm 69 0> (tlmm phandle=$TLMM)"
         # ── BT UART pinctrl: parche en el DRIVER (no hog en el DT) ──────────
         # El nodo UART se deja EXACTAMENTE como el stock/aurora. Comprobado
         # 19-09-2026: (a) los grupos qupv3_se5_* son identicos a aurora y la
