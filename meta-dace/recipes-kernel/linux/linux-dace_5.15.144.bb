@@ -33,6 +33,7 @@ SRC_URI = "git://gitlab.com/ubports/porting/community-ports/android13/google-eos
            file://opp-icc-tolerant.patch \
            file://arm-smmu-skip-init.patch \
            file://dace-hs-uart-fifo.patch \
+           file://dace-hs-uart-pinctrl.patch \
            file://zinitix-reset-gpio.patch \
            file://raydium-dace-polarity.patch \
            file://icc-rpm-novote.patch \

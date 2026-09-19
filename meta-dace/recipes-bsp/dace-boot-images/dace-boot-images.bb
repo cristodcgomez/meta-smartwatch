@@ -274,30 +274,17 @@ do_compile() {
             qcom,bt-vdd-pa-supply 0x84
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
             qcom,bt-vdd-xtal-supply 0x131
-        # ── BT UART: mux qup05 via HOG en el propio controlador ──────────────
-        # Comprobado 19-09-2026 (comparando con aurora, Pixel Watch 2, mismo SoC
-        # SW5100 y MISMO kernel): los grupos de pines qupv3_se5_*(cts/rts/tx/rx)
-        # son IDENTICOS en ambos DTB (mismos phandles 0x6e-0x71, function=qup05)
-        # y la asignacion pinctrl-N del nodo UART tambien coincide con el stock.
-        # El parche anterior (23259b2d) copiaba 'active' a default/sleep y NO
-        # arreglaba nada: en vivo los pines 26-29 seguian en function=gpio DURANTE
-        # todo el intento del HAL, y el dump del SE daba rx_fifo_sts:0x0 (al UART
-        # no le llega ni un bit -> el chip parece mudo). Como el driver solo muxea
-        # en su ciclo PM (resources_on/off) y aqui ese ciclo no se ejecuta, lo
-        # forzamos con un pin-control HOG en el nodo del propio controlador
-        # (pinctrl-N + pinctrl-names 'default' en pinctrl@500000), que el core de
-        # pinctrl aplica al registrarlo, sin depender del runtime PM del driver.
-        # Los phandles se leen del propio dtb (fdtget), no se hardcodean.
-        UART="/soc/qcom,qupv3_0_geni_se@4ac0000/qcom,qup_uart@4a94000"
-        PIN_CTS=$("$FDTGET" -t x ${WORKDIR}/${dtb}-per.dtb "$UART" pinctrl-1 | awk '{print $1}')
-        PIN_RTS=$("$FDTGET" -t x ${WORKDIR}/${dtb}-per.dtb "$UART" pinctrl-1 | awk '{print $2}')
-        PIN_TX=$("$FDTGET" -t x ${WORKDIR}/${dtb}-per.dtb "$UART" pinctrl-1 | awk '{print $3}')
-        PIN_RX=$("$FDTGET" -t x ${WORKDIR}/${dtb}-per.dtb "$UART" pinctrl-1 | awk '{print $4}')
-        PINCTRL_DEV="/soc/pinctrl@500000"
-        "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb "$PINCTRL_DEV" pinctrl-names default
-        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb "$PINCTRL_DEV" pinctrl-0 \
-            "$PIN_CTS" "$PIN_RTS" "$PIN_TX" "$PIN_RX"
-        bbnote "$dtb: BT UART hog pinctrl@500000 = qup05 ($PIN_CTS $PIN_RTS $PIN_TX $PIN_RX)"
+        # ── BT UART pinctrl: parche en el DRIVER (no hog en el DT) ──────────
+        # El nodo UART se deja EXACTAMENTE como el stock/aurora. Comprobado
+        # 19-09-2026: (a) los grupos qupv3_se5_* son identicos a aurora y la
+        # asignacion pinctrl-N tambien; (b) el hack 23259b2d (default/sleep =
+        # qup05) NO muxea (los pines 26-29 siguen en function=gpio durante todo
+        # el intento del HAL); (c) un HOG en /soc/pinctrl@500000 SI muxea a
+        # qup05 pero RECLAMA los pines y rompe el probe del UART (msm_geni_serial
+        # carga con 0 puertos: no aparece /dev/ttyHS*).
+        # La solucion es forzar el mux desde el propio driver en
+        # msm_geni_serial_probe() -> dace-hs-uart-pinctrl.patch (en linux-dace).
+        bbnote "$dtb: BT UART pinctrl lo fuerza el driver (dace-hs-uart-pinctrl.patch)"
         bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, sin OPP) + RAYDIUM rm32380 @0x39 (i2c-1) + zinitix disabled + BT rieles"
     done
     cat ${WORKDIR}/monaco-real-per.dtb ${WORKDIR}/monacop-per.dtb > ${WORKDIR}/dtb-blob-vendor.bin

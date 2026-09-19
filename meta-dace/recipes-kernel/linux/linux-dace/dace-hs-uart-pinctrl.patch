@@ -1,0 +1,52 @@
+From: dace bring-up <dace@localhost>
+Date: Sat, 19 Sep 2026 15:00:00 +0000
+Subject: [PATCH] tty: serial: msm_geni_serial: forzar el mux qup05 del HS UART en el probe
+
+En monaco/dace el unico sitio que muxea los pines del HS UART (GPIO 26-29:
+TXRX/CTS/RTS) a la funcion qup05 es
+msm_geni_serial_resources_on() -> pinctrl_select_state(geni_gpio_active),
+que solo corre en el ciclo runtime-PM (runtime_resume). En este device ese
+ciclo no se ejecuta, asi que los pines se quedan en "function gpio" y el
+bloque UART no recibe ni envia nada: el BT WCN3988 parece mudo aunque el HAL
+vendor hace todo el bring-up (PowerUpChip, wakeup, baudios, Get Version) y el
+SE esta limpio (rx_fifo_sts:0x0, geni_ios:0x0).
+
+Medido en vivo (pinctrl debugfs muestreado cada 0.5 s durante el intento del
+HAL): los 4 pines nunca pasan a qup05. El DT es identico al de aurora (Pixel
+Watch 2, mismo SW5100 y mismo kernel), y el DT es correcto en ambos (grupos
+qupv3_se5_cts/rts/tx/rx con function="qup05"). Un "hog" de pinctrl en el
+controlador SI muxea pero reclama los pines y rompe el probe del UART
+(msm_geni_serial carga con 0 puertos). Por eso forzamos aqui el mux una vez,
+en el probe, con el retorno visible.
+
+Upstream-Status: Inappropriate [dace bring-up]
+
+Signed-off-by: dace bring-up <dace@localhost>
+---
+ drivers/tty/serial/msm_geni_serial.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+--- a/drivers/tty/serial/msm_geni_serial.c
++++ b/drivers/tty/serial/msm_geni_serial.c
+@@ -4530,6 +4530,19 @@ static int msm_geni_serial_probe(struct platform_device *pdev)
+ 	if (IS_ERR_OR_NULL(dev_port->serial_rsc.geni_gpio_sleep)) {
+ 		dev_err(&pdev->dev, "No sleep config specified!\n");
+ 		return PTR_ERR(dev_port->serial_rsc.geni_gpio_sleep);
+ 	}
+ 
++	/*
++	 * dace: el ciclo runtime-PM no corre en este device, asi que el
++	 * pinctrl_select_state(active) de msm_geni_serial_resources_on() no
++	 * muxea nunca los pines del HS UART a qup05 (se quedan en
++	 * function=gpio y el BT no puede hablar por la UART). Forzamos el
++	 * mux aqui, una vez, en el probe, dejando el retorno en el log.
++	 */
++	ret = pinctrl_select_state(dev_port->serial_rsc.geni_pinctrl,
++				   dev_port->serial_rsc.geni_gpio_active);
++	if (ret)
++		dev_err(&pdev->dev, "%s: failed to select active pinctrl state: %d\n",
++			__func__, ret);
++
+ 	uport->irq = platform_get_irq(pdev, 0);
+ 	if (uport->irq < 0) {
+ 		ret = uport->irq;
