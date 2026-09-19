@@ -28,6 +28,32 @@ for svc in vendor.qti.hardware.display.allocator vendor.qti.hardware.display.com
     sleep 2
 done
 
+# ─────────── BLUETOOTH (ruta de aurora: HAL vendor + bluebinder) ───────────
+# El HAL BT de Qualcomm (/vendor/bin/hw/android.hardware.bluetooth@1.0-service-qti)
+# es el que hace todo el bring-up real del WCN3988: power-up del chip via
+# /dev/btpower, wakeup + cambio de baudios por la UART (/dev/ttyHS0 con
+# /sys/class/tty/ttyHS0/device/hs_uart_operation) y descarga del firmware
+# apbtfw11.tlv/apnv11.bin. bluebinder (host) lo consume por binder/hci_vhci.
+# Su .rc NO tiene linea 'interface' -> igual que allocator/composer, hay que
+# arrancarlo con ctl.start (el ctl.interface_start de hwservicemanager no lo
+# mapea y bluebinder se queda en 'Waiting for bluetooth service' para siempre).
+#
+# DOS PERMISOS que hay que arreglar (medido en vivo 19-09-2026):
+#  - /dev/ttyHS0 del CONTENEDOR es crw------- root root (el ueventd del host
+#    no manda en el /dev tmpfs del contenedor; el stock no trae regla para
+#    ttyHS0). El HAL corre como user 'bluetooth' -> EACCES al abrir la UART.
+#  - /sys/class/tty/ttyHS0/device/hs_uart_operation es -rw-r--r-- root root (lo
+#    crea msm_geni_serial) y el HAL necesita escribirlo -> EACCES.
+# Sin estos dos el HAL muere con 'UART INIT failed'.
+lxc-attach -n android -- /system/bin/toybox chmod 0666 /dev/ttyHS0 2>/dev/null \
+    && echo "dace-lxc-hal-start: /dev/ttyHS0 -> 0666 (contenedor)"
+lxc-attach -n android -- /system/bin/toybox chmod 0666 /sys/class/tty/ttyHS0/device/hs_uart_operation 2>/dev/null \
+    && echo "dace-lxc-hal-start: hs_uart_operation -> 0666 (contenedor)"
+lxc-attach -n android -- /system/bin/setprop ctl.start vendor.bluetooth-1-0-qti 2>/dev/null
+sleep 3
+lxc-attach -n android -- /system/bin/getprop init.svc.vendor.bluetooth-1-0-qti 2>/dev/null \
+    | sed 's/^/dace-lxc-hal-start: BT HAL init.svc.vendor.bluetooth-1-0-qti=/'
+
 # TACTIL: cargar el driver del RAYDIUM AHORA (no antes). Con un driver de
 # táctil presente desde el arranque, el composer-service de Qualcomm muere con
 # SIGSEGV ~0.2 s despues de crear /dev/socket/pps y la UI se queda sin composer
