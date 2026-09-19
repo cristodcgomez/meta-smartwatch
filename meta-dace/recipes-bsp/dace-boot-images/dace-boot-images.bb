@@ -274,20 +274,30 @@ do_compile() {
             qcom,bt-vdd-pa-supply 0x84
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
             qcom,bt-vdd-xtal-supply 0x131
-        # ── BT UART: pinctrl SIEMPRE en qup05 ──────────────────────
-        # El driver del HS UART solo muxea los pines a qup05 en
-        # msm_geni_serial_runtime_resume() -> resources_on(). En este
-        # device el runtime PM se queda "active" sin llamar al callback (o
-        # autosuspende a "sleep"), asi que los pines 26-29 se quedan en
-        # function=gpio y el UART NO saca datos (el chip parece mudo:
-        # hci0 TX ok pero RX 0). Copiamos los grupos del estado "active"
-        # (qup05) a "default" y "sleep" para que el muxeo no dependa del PM.
-        # (fdtget lee los phandles reales del propio dtb, no se hardcodean.)
+        # ── BT UART: mux qup05 via HOG en el propio controlador ──────────────
+        # Comprobado 19-09-2026 (comparando con aurora, Pixel Watch 2, mismo SoC
+        # SW5100 y MISMO kernel): los grupos de pines qupv3_se5_*(cts/rts/tx/rx)
+        # son IDENTICOS en ambos DTB (mismos phandles 0x6e-0x71, function=qup05)
+        # y la asignacion pinctrl-N del nodo UART tambien coincide con el stock.
+        # El parche anterior (23259b2d) copiaba 'active' a default/sleep y NO
+        # arreglaba nada: en vivo los pines 26-29 seguian en function=gpio DURANTE
+        # todo el intento del HAL, y el dump del SE daba rx_fifo_sts:0x0 (al UART
+        # no le llega ni un bit -> el chip parece mudo). Como el driver solo muxea
+        # en su ciclo PM (resources_on/off) y aqui ese ciclo no se ejecuta, lo
+        # forzamos con un pin-control HOG en el nodo del propio controlador
+        # (pinctrl-N + pinctrl-names 'default' en pinctrl@500000), que el core de
+        # pinctrl aplica al registrarlo, sin depender del runtime PM del driver.
+        # Los phandles se leen del propio dtb (fdtget), no se hardcodean.
         UART="/soc/qcom,qupv3_0_geni_se@4ac0000/qcom,qup_uart@4a94000"
-        BT_PIN_ACTIVE=$("$FDTGET" -t x ${WORKDIR}/${dtb}-per.dtb "$UART" pinctrl-1)
-        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb "$UART" pinctrl-0 $BT_PIN_ACTIVE
-        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb "$UART" pinctrl-2 $BT_PIN_ACTIVE
-        bbnote "$dtb: BT UART pinctrl-0/2 = pinctrl-1 (qup05): $BT_PIN_ACTIVE"
+        PIN_CTS=$("$FDTGET" -t x ${WORKDIR}/${dtb}-per.dtb "$UART" pinctrl-1 | awk '{print $1}')
+        PIN_RTS=$("$FDTGET" -t x ${WORKDIR}/${dtb}-per.dtb "$UART" pinctrl-1 | awk '{print $2}')
+        PIN_TX=$("$FDTGET" -t x ${WORKDIR}/${dtb}-per.dtb "$UART" pinctrl-1 | awk '{print $3}')
+        PIN_RX=$("$FDTGET" -t x ${WORKDIR}/${dtb}-per.dtb "$UART" pinctrl-1 | awk '{print $4}')
+        PINCTRL_DEV="/soc/pinctrl@500000"
+        "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb "$PINCTRL_DEV" pinctrl-names default
+        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb "$PINCTRL_DEV" pinctrl-0 \
+            "$PIN_CTS" "$PIN_RTS" "$PIN_TX" "$PIN_RX"
+        bbnote "$dtb: BT UART hog pinctrl@500000 = qup05 ($PIN_CTS $PIN_RTS $PIN_TX $PIN_RX)"
         bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, sin OPP) + RAYDIUM rm32380 @0x39 (i2c-1) + zinitix disabled + BT rieles"
     done
     cat ${WORKDIR}/monaco-real-per.dtb ${WORKDIR}/monacop-per.dtb > ${WORKDIR}/dtb-blob-vendor.bin
