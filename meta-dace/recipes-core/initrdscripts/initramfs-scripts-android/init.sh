@@ -154,6 +154,15 @@ setup_usb_console
 sleep 2
 info "DISPLAY: consola arriba, cargando qnoc-monaco"
 modprobe qnoc-monaco 2>/dev/kmsg ; info "DISPLAY: qnoc-monaco rc=$?"
+# El retry de arm_smmu es ASINCRONO (workqueue de deferred probe) y el wrapper
+# QUP (built-in, deferido desde los initcalls) se reintenta tambien. Esperar a
+# que el apps-smmu este BINDEADO antes de cargar los drivers del QUP: si no,
+# probearian igualmente sin dominio IOMMU (el bug original).
+_i=0
+while [ $_i -lt 25 ] && [ ! -e /sys/bus/platform/drivers/arm-smmu/c600000.apps-smmu ]; do
+    _i=$((_i+1)); sleep 1
+done
+info "IOMMU: apps-smmu bindeado tras ${_i}s ($(ls /sys/class/iommu/ 2>/dev/null | tr '\n' ' '))"
 # ── QUP/GPI: dominio IOMMU del apps-smmu (fix del reset del SPI del slate) ──
 # qnoc-monaco registra el proveedor ICC y DESBLOQUEA el probe del apps-smmu
 # (arm_smmu.ko, que esta diferido hasta este momento). A partir de aqui los
