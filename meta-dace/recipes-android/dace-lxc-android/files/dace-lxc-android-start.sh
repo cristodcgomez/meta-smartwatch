@@ -108,6 +108,30 @@ for src in /android/vendor /android/vendor_dlkm; do
     fi
 done
 
+# ─ Firmware del BT (WCN3988) donde el HAL vendor lo busca ───────────────
+# El HAL Qualcomm abre /dev/ttyHS0, alimenta el chip y pide el firmware
+# (apbtfw11.tlv / apnv11.bin) por la ruta estandar de Android
+# (/vendor/firmware, /etc/firmware, /firmware/image). Nuestro dace-bt-firmware
+# los deja en /lib/firmware/qca del HOST, que esa ruta no mira -> el HAL no
+# encuentra el firmware y el arranque del chip no completa. Montamos un overlay
+# por bind: staging con el contenido del /vendor/firmware stock + los ficheros
+# BT. (ruta: /lib/firmware/qca, simetrica a la que ya usa el driver btqca).
+BTFW_SRC=/lib/firmware/qca
+if [ -d "$BTFW_SRC" ] && [ -d "$ROOTFS/vendor/firmware" ]; then
+    VFW_STAGE=/run/dace-vendor-firmware
+    rm -rf "$VFW_STAGE"
+    mkdir -p "$VFW_STAGE"
+    cp -a "$ROOTFS/vendor/firmware/." "$VFW_STAGE/" 2>/dev/null || true
+    _n=0
+    for _f in "$BTFW_SRC"/apbtfw*.tlv "$BTFW_SRC"/apnv*.bin; do
+        [ -e "$_f" ] || continue
+        cp -a "$_f" "$VFW_STAGE/" 2>/dev/null && _n=$((_n + 1))
+    done
+    if mount --bind "$VFW_STAGE" "$ROOTFS/vendor/firmware"; then
+        echo "dace-lxc-android: overlay /vendor/firmware (+$_n ficheros BT)"
+    fi
+fi
+
 # Mask vendor init's USB scripts. AsteroidOS owns the USB gadget end-to-end
 # (init_gfs.service stages /config/usb_gadget/g1; dace-udc-bind binds UDC
 # once adbd has its FunctionFS endpoints). Halium already neutralizes the
