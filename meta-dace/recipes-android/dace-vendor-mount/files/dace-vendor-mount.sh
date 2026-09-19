@@ -126,6 +126,24 @@ while [ $i -lt 150 ] && [ ! -e /sys/class/remoteproc/remoteproc1 ]; do
     sleep 0.2; i=$((i+1))
 done
 
+# ─ Habilitar RECOVERY en los remoteproc (clave para el DOG del modem) ──────
+# qcom_q6v5_pas hard-codea rproc->recovery_disabled = true (linea 1047 del
+# source). Con recovery deshabilitado, un fatal error del firmware (p.ej. el
+# DOG "stalled initialization" del modem, que dispara a los ~40 s) NO se
+# recupera: el kernel hace panic y el SoC se resetea
+# ("rproc recovery state: disabled -> device crash"). aurora CONVIVE con los
+# crashes del modem (su propia nota: "modem perpetually crashes & recovers").
+# Habilitando recovery desde sysfs, el mismo DOG pasa a
+# "recovery state: enabled and kick recovery process" y el reloj sobrevive;
+# el modem se relanza solo. Verificado 19-09-2026: crash #1/#2 cada ~40 s con
+# el reloj estable y adb vivo (antes, reset inmediato).
+for r in /sys/class/remoteproc/remoteproc*; do
+    [ -e "$r/recovery" ] || continue
+    [ "$(cat "$r/recovery" 2>/dev/null)" = "enabled" ] && continue
+    echo enabled > "$r/recovery" 2>/dev/null && \
+        echo "dace-vendor-mount: $(basename $r) recovery -> enabled" > /dev/kmsg || true
+done
+
 # ─ ORDEN DE AURORA: primero el MODEM, luego el ADSP ──────────────────────────
 # El aurora-vendor-mount.sh de aurora hace exactamente esto: monta el firmware,
 # fija firmware_class.path y escribe `start` en remoteproc1 (modem). El ADSP lo
