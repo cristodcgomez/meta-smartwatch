@@ -2,9 +2,13 @@
 # dace kernel source fixes:
 #  1. boot-color debug (RED/AZUL/AMARILLO) en init/main.c
 #  2. slatecom_interface.c: hacer ssr_register() condicional a que
-#     qcom_register_ssr_notifier exista (QCOM_RPROC_COMMON built-in).
-#     Es tristate ciego y no se puede forzar =y; sin el stub el link de
-#     vmlinux rompe con 'undefined symbol: qcom_register_ssr_notifier'.
+#     qcom_register_ssr_notifier sea ALCANZABLE (IS_REACHABLE: built-in O
+#     modulo). Es tristate ciego y no se puede forzar =y; sin el stub el link
+#     de vmlinux rompe con 'undefined symbol: qcom_register_ssr_notifier'.
+#     v2 (2026-09-20): IS_BUILTIN era demasiado estricto (en dace
+#     QCOM_RPROC_COMMON=m) y dejaba el registro SSR SIN HACER: el MCU del
+#     slate arrancaba pero nunca se llamaba slatecom_set_spi_state(SPI_FREE)
+#     -> sin IRQ qcom-slate_spi -> sin enlace glink -> sin corona ni BT.
 #
 # ── v2 (2026-08-24): corrección crítica de la telemetría ──
 # La v1 usaba ioremap_wc() sobre 0x5c000000. Esa región (splash_region) es
@@ -349,16 +353,31 @@ def patch_slatecom(path):
         print("slatecom: %s no existe, skip" % path)
         return
     src = open(path).read()
-    if 'IS_BUILTIN(CONFIG_QCOM_RPROC_COMMON)' in src:
-        print("slatecom: ya parcheado")
+    if 'IS_REACHABLE(CONFIG_QCOM_RPROC_COMMON)' in src:
+        print("slatecom: ya parcheado (IS_REACHABLE)")
         return
-    # envolver el cuerpo de ssr_register en un if IS_BUILTIN
-    old = '''static void ssr_register(void)
+    new = '''static void ssr_register(void)
 {
 	int i;
 
+	/* dace fix v2: qcom_register_ssr_notifier vive en QCOM_RPROC_COMMON, que
+	 * en dace es MODULO (=m), no built-in. Con IS_BUILTIN este if era
+	 * SIEMPRE cierto y ssr_register() salia sin registrar NADA: ssr_slate_cb
+	 * no corria nunca, slatecom_set_spi_state(SLATECOM_SPI_FREE) no se
+	 * llamaba al arrancar el MCU y la IRQ qcom-slate_spi no se pedia -> el
+	 * enlace glink no subia (ni corona ni BT, que van por el MCU).
+	 * IS_REACHABLE es lo correcto: cierto si el provider es built-in O si
+	 * ambos (provider y este fichero) son modulos. */
+	if (!IS_REACHABLE(CONFIG_QCOM_RPROC_COMMON)) {
+		pr_info("ssr_register: QCOM_RPROC_COMMON no alcanzable, skip\\n");
+		return;
+	}
+
 	for (i = 0; i < ARRAY_SIZE(service_data); i++) {'''
-    new = '''static void ssr_register(void)
+    # v2: si ya estaba la version v1 (IS_BUILTIN) hay que SUSTITUIR el bloque
+    # inyectado, no volver a insertar (el arbol kernel-source es compartido y
+    # puede venir ya parcheado de un build anterior).
+    old_v1 = '''static void ssr_register(void)
 {
 	int i;
 
@@ -373,11 +392,21 @@ def patch_slatecom(path):
 	}
 
 	for (i = 0; i < ARRAY_SIZE(service_data); i++) {'''
+    if old_v1 in src:
+        src = src.replace(old_v1, new, 1)
+        open(path, 'w').write(src)
+        print("slatecom: v1 (IS_BUILTIN) -> v2 (IS_REACHABLE) OK")
+        return
+    old = '''static void ssr_register(void)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(service_data); i++) {'''
     if old not in src:
         sys.exit("slatecom: no se encontro ssr_register")
     src = src.replace(old, new, 1)
     open(path, 'w').write(src)
-    print("slatecom: ssr_register condicional OK")
+    print("slatecom: ssr_register con IS_REACHABLE OK")
 
 patch_bootcolor(sys.argv[1])
 patch_slatecom(sys.argv[2])

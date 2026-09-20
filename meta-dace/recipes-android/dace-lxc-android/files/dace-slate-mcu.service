@@ -1,0 +1,23 @@
+[Unit]
+Description=dace: arranca el MCU del slate (remoteproc2) - habilita corona y BT
+Documentation=file:///usr/libexec/dace-slate-mcu.sh
+DefaultDependencies=no
+# El firmware del MCU (slatefw.mdt) lo sirve dace-vendor-mount (firmware_class.path
+# + /vendor/firmware_mnt). Los .ko del slate los carga udev/modprobe mucho antes.
+After=dace-lxc-android.service
+Requires=dace-lxc-android.service
+Before=dace-lxc-hal-start.service
+ConditionPathExists=/sys/class/remoteproc/remoteproc2/state
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/dace-slate-mcu.sh
+StandardOutput=journal+console
+StandardError=journal+console
+# El arranque del MCU tarda ~2 s; si algo se cuelga no queremos bloquear el boot
+# (systemd mata el script; el reloj arranca igual, sin corona ni BT).
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target

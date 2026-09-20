@@ -254,26 +254,25 @@ do_compile() {
         else
             bbwarn "$dtb: falta monaco-idp-v1-overlay.dtbo"
         fi
-        # ── BT/WCN3988: rieles del btpower ───────────────────────
-        # El DTB stock trae el nodo pelado (solo compatible). Los rieles
-        # reales estan en el source stock monaco-standalone-idp-v1.dtsi:
-        # IO=L17A (0x184), core/RFA=L13A (0x181), PA/CH0=L26A (0x84),
-        # XO=L14A (0x131). Todos RPM regulators (rpm_smd_regulator).
-        # OJO ORDEN del compatible: __of_device_is_compatible() puntua mas alto
-        # el compatible que va PRIMERO (score = INT_MAX/2 - index<<2). Con
-        # "qcom,qcc5100" primero, btpower usaba la tabla qcc5100 (SOLO pa) y
-        # dejaba io/core APAGADOS (chip mudo). Poniendo "qcom,wcn3990" primero
-        # usa la tabla wcn399x (io/core/pa/xtal).
-        "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
-            compatible "qcom,wcn3990" "qcom,qcc5100"
-        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
-            qcom,bt-vdd-io-supply 0x184
-        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
-            qcom,bt-vdd-core-supply 0x181
-        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
-            qcom,bt-vdd-pa-supply 0x84
-        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
-            qcom,bt-vdd-xtal-supply 0x131
+        # ── BT/WCN3988: el compatible lo DECIDE EL HAL (¡no tocar!) ─────────
+        # El nodo stock es `bt_wcn3990 { compatible = "qcom,qcc5100"; }` y
+        # NO lleva supplies: con el SOC en modo `slate` (ver abajo) los rieles
+        # del chip los gobierna el MCU del slate, no el AP (por eso el stock
+        # arranca sin ningun qcom,bt-vdd-*-supply).
+        #
+        # OJO 20-09-2026: el HAL de BT lee el `compatible` de ESTE nodo y de ahi
+        # deduce el tipo de SOC. Con "qcom,wcn3990" (lo que haciamos para que
+        # btpower casara su tabla wcn399x) el HAL elige CHEROKEE y anula el
+        # persist.vendor.qcom.bluetooth.soc=slate del vendor/build.prop:
+        #   setVendorPropertiesDefault: Soc version recevied : qcom,wcn3990
+        #   Bluetooth soc type set to: cherokee, ret: 8
+        # -> usa HciUartTransport sobre /dev/ttyHS0 y el chip no responde
+        #    (su UART esta detras del MCU). Con "qcom,qcc5100" (stock) elige
+        #    SLATE -> MctController/HciMctTransport por el enlace glink del
+        #    MCU (que es lo que funciona en el reloj).
+        # Por eso NO se toca el compatible ni se a~naden rieles: paridad exacta
+        # con el DTB stock.
+        bbnote "$dtb: BT node sin tocar (compatible stock qcom,qcc5100 -> SOC slate en el HAL)"
         # ─ BT reset/enable: qcom,bt-sw-ctrl-gpio ────────────────────────────
         # El stock lo trae pero COMENTADO (monaco-standalone-idp-v1.dtsi:
         # //qcom,bt-sw-ctrl-gpio = <&tlmm 69 GPIO_ACTIVE_HIGH>). El HAL pide
