@@ -33,21 +33,24 @@ log() { echo "dace-slate-mcu: $*"; }
 # 2) powerstateservice (vendor.qti.hardware.powerstateservice@1.0).
 #    Es el PEER de estado del MCU slate (TWM/deep-sleep): el fichero power_state
 #    y /dev/slate_com_dev. Su .rc NO trae linea 'interface' -> igual que
-#    allocator/composer, hay que arrancarlo con ctl.start.
+#    allocator/composer, hay que arrancarlo con ctl.start (dace-lxc-android-start
+#    ademas le añade la linea 'interface' al .rc, asi init tambien lo arranca
+#    solo si algun cliente lo pide).
 #    TIENE QUE ESTAR ARRANCADO ANTES DE LEVANTAR EL MCU: sin el, el MCU se queda
 #    sin quien le conteste los cambios de estado y el SoC se RESETEA ~8 s despues
-#    de subir el enlace glink (medido 20-09-2026: con pss antes del MCU el
-#    sistema aguanta; sin el, reset duro a fastboot). El container pide este
+#    de subir el enlace glink (medido 20-09-2026). El container pide este
 #    servicio a gritos ('Could not find ...IPowerStateService/default').
+#    OJO: todos los lxc-attach van con `timeout`: en 2 de 3 arranques se quedo
+#    colgado indefinidamente y el servicio nunca llegaba a arrancar el MCU.
 i=0
 while [ $i -lt 60 ]; do
-    lxc-attach -n android -- /system/bin/getprop 2>/dev/null | grep -q . && break
+    timeout 15 lxc-attach -n android -- /system/bin/getprop 2>/dev/null | grep -q . && break
     i=$((i + 1))
     sleep 2
 done
-if lxc-attach -n android -- /system/bin/setprop ctl.start powerstateservice-hal-1-0 2>/dev/null; then
+if timeout 15 lxc-attach -n android -- /system/bin/setprop ctl.start powerstateservice-hal-1-0 2>/dev/null; then
     sleep 2
-    log "powerstateservice-hal-1-0 init.svc=$(lxc-attach -n android -- /system/bin/getprop init.svc.powerstateservice-hal-1-0 2>/dev/null)"
+    log "powerstateservice-hal-1-0 init.svc=$(timeout 15 lxc-attach -n android -- /system/bin/getprop init.svc.powerstateservice-hal-1-0 2>/dev/null)"
 else
     log "AVISO: no se pudo arrancar powerstateservice-hal-1-0 (el MCU puede resetear el SoC)"
 fi
@@ -92,8 +95,29 @@ while [ $i -lt 20 ]; do
 done
 log "slate_bt_state=${bt:-?} dsp_state=$(cat /sys/kernel/slate_dsp_state/slate_dsp_state 2>/dev/null)"
 if [ "$(cat /sys/kernel/slate_bt_state/slate_bt_state 2>/dev/null)" = "ready" ]; then
-    log "slate OK (BT listo; el HAL del contenedor puede arrancar)"
+    # El HAL de BT se rinde tras ~3 intentos (uno por minuto) si BTSS aun no
+    # estaba listo, y NO reintenta solo (el proceso queda vivo pero idle). Con
+    # el MCU ya arriba hay que relanzarlo: es exactamente la secuencia verificada
+    # en vivo (bring-up completo -> hci0 UP RUNNING con su BD Address).
+    if timeout 20 lxc-attach -n android -- /system/bin/setprop ctl.restart vendor.bluetooth-1-0-qti 2>/dev/null; then
+        log "HAL de BT relanzado (slate listo) -> deberia subir hci0"
+    else
+        log "AVISO: no se pudo relanzar el HAL de BT (arrancalo a mano)"
+    fi
+    log "slate OK (BT listo)"
 else
     log "AVISO: slate_bt_state no esta ready (revisar el enlace glink)"
 fi
+
+# 7) Esperar a que el controlador quede operativo (hci0 con BD address).
+i=0
+while [ $i -lt 40 ]; do
+    if hciconfig 2>/dev/null | grep -qE "BD Address: ([0-9A-Fa-f]{2}:){5}"; then
+        log "hci0 LISTO: $(hciconfig 2>/dev/null | sed -n 2p | tr -s " ")"
+        break
+    fi
+    i=$((i + 1))
+    sleep 2
+done
+[ $i -ge 40 ] && log "AVISO: hci0 no subio en ~80 s (mirar logcat del contenedor)"
 exit 0

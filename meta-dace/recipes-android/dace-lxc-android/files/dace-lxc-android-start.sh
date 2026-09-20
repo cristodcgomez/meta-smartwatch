@@ -194,6 +194,30 @@ if [ -f "$PIXELSTATS_RC" ] && ! mountpoint -q "$PIXELSTATS_RC"; then
     fi
 fi
 
+# -- powerstateservice: anadirle la linea 'interface' ---------------
+# Su .rc (vendor.qti.hardware.powerstateservice@1.0-service.rc) declara el
+# servicio pero SIN 'interface', asi que hwservicemanager no puede mapear el
+# `ctl.interface_start` que emiten los clientes y el servicio NUNCA arranca:
+#   init: Control message: Could not find
+#     'vendor.qti.hardware.powerstateservice@1.0::IPowerStateService/default'
+# (cada ~60 s, para siempre). Y es el PEER de estado del MCU slate (TWM/deep
+# sleep, /dev/power_state + /dev/slate_com_dev): sin el, el MCU se queda sin
+# quien le conteste y el SoC acaba en Oops a los pocos segundos de levantar el
+# enlace. Se overlaide el .rc con la linea anadida (mismo bind-mount que los
+# de USB/pixelstats) para que init lo arranque solo.
+PSS_RC="$VENDOR_INIT/vendor.qti.hardware.powerstateservice@1.0-service.rc"
+if [ -f "$PSS_RC" ] && ! mountpoint -q "$PSS_RC"; then
+    if grep -qE '^[[:space:]]*interface[[:space:]]' "$PSS_RC"; then
+        echo "dace-lxc-android: pss ya trae 'interface'"
+    else
+        awk '{ print } /^service[[:space:]]/ { print "    interface vendor.qti.hardware.powerstateservice@1.0::IPowerStateService default" }' \
+            "$PSS_RC" > /run/dace-pss-service.rc 2>/dev/null
+        if [ -s /run/dace-pss-service.rc ] && mount --bind /run/dace-pss-service.rc "$PSS_RC"; then
+            echo "dace-lxc-android: powerstateservice .rc con 'interface' (init lo arranca solo)"
+        fi
+    fi
+fi
+
 # Drop the CDSP and CVP remoteproc boot writes from init.qti.kernel.rc's
 # early-boot action. The Compute-DSP (camera ML / NN / FastRPC compute offload)
 # and CVP (Computer Vision Processor: camera EIS / motion / detection) only
