@@ -104,6 +104,16 @@ if [ "$(cat /sys/kernel/slate_bt_state/slate_bt_state 2>/dev/null)" = "ready" ];
     else
         log "AVISO: no se pudo relanzar el HAL de BT (arrancalo a mano)"
     fi
+    # bluebinder (host) es el CLIENTE del HAL: si arranco antes que el HAL (o
+    # antes de que el MCU estuviera listo) se queda en "Waiting for bluetooth
+    # service" PARA SIEMPRE (documentado en AGENTS §7) y el HAL nunca llega a
+    # inicializar -> hci0 se queda sin BD address. Se reinicia para que se
+    # reconecte al HAL recien relanzado.
+    if systemctl restart bluebinder 2>/dev/null; then
+        log "bluebinder reiniciado (el cliente del HAL BT)"
+    else
+        log "AVISO: no se pudo reiniciar bluebinder"
+    fi
     log "slate OK (BT listo)"
 else
     log "AVISO: slate_bt_state no esta ready (revisar el enlace glink)"
