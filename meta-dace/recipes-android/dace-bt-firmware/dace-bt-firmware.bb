@@ -1,14 +1,18 @@
-SUMMARY = "Firmware QCA del BT del TicWatch Pro 5 (dace): familia 'ap' y 'sl'"
-DESCRIPTION = "Extraido de la particion stock 'bluetooth' (/dev/mmcblk0p18, FAT16): \
-/image/apbtfw11.tlv + apnv11.bin (familia 'ap' del WCN3988) y \
-/image/slbtfw20.mbn + slnv20.bin (familia 'sl'). \
-OJO (20-09-2026): con el SOC en modo **slate** (DT compatible qcom,qcc5100, que es \
-lo que hay en stock) el HAL de Qualcomm pide la familia **sl**: \
-  File open /vendor/firmware/slbtfw20.mbn succeeded   <- parche (376 segmentos)
-  File open /vendor/firmware/slnv20.bin succeeded     <- NVM (17 segmentos)
-Sin esos dos ficheros el chip arranca (contesta Get Version) pero no recibe \
-el patch y el HAL muere con 'Controller Init failed'. La familia 'ap' se deja \
-por si algun dia se usa la ruta btattach/btqca (soc cherokee)."
+SUMMARY = "Firmware QCA del BT del TicWatch Pro 5 (dace)"
+# Extraido de la particion stock 'bluetooth' (/dev/mmcblk0p18, FAT16):
+#   /image/apbtfw11.tlv + apnv11.bin   -> familia 'ap' del WCN3988
+#   /image/slbtfw20.mbn + slnv20.bin   -> familia 'sl' (la del modo slate)
+#
+# OJO (20-09-2026): con el SOC en modo slate (DT compatible qcom,qcc5100, que es
+# lo que trae el stock) el HAL de Qualcomm pide la familia **sl** y estos dos
+# ficheros tienen que estar en /vendor/firmware del contenedor (los copia
+# dace-lxc-android-start.sh desde /lib/firmware/qca):
+#   File open /vendor/firmware/slbtfw20.mbn succeeded   <- parche (376 segmentos)
+#   File open /vendor/firmware/slnv20.bin  succeeded    <- NVM   (17 segmentos)
+# Sin ellos el chip arranca (contesta Get Version) pero no recibe el patch y el
+# HAL muere con 'Controller Init failed'. La familia 'ap' se deja por si algun
+# dia se usa la ruta btattach/btqca (soc cherokee).
+DESCRIPTION = "Firmware QCA del BT (WCN3988) del TicWatch Pro 5: familias ap y sl, extraidas de la particion bluetooth p18"
 LICENSE = "CLOSED"
 COMPATIBLE_MACHINE = "dace"
 
