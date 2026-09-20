@@ -1,0 +1,70 @@
+From: TicWatch Pro 5 (dace) port
+Subject: [PATCH] iommu/of: devolver -EPROBE_DEFER incondicional (dace bring-up)
+
+En dace el apps-smmu es un modulo que no puede probear hasta que qnoc-monaco
+registra el proveedor ICC (carga del initramfs). Los devices con "iommus" que
+probean antes (el wrapper QUP es built-in, y msm_gpi/i2c-spi-msm-geni cargan en
+el bucle) reciben de of_iommu_xlate() el -ETIMEDOUT de
+driver_deferred_probe_check_state() (porque los modulos cargan DESPUES de los
+initcalls y driver_deferred_probe_timeout==0) y se quedan SIN dominio IOMMU.
+
+Y en este SoC quedarse sin dominio NO es inofensivo: el firmware deja el
+apps-smmu con CLIENTPD=0 y USFCFG=1, y ese bit esta BLOQUEADO por TZ (nuestro
+intento de limpiarlo no prende: read-back 0x00e01c06 con el bit 0x400 puesto).
+USFCFG=1 ABORTA los streams no identificados. La tabla del firmware solo tiene
+4 SMR (0xc0 eMMC, 0xa0 y 0x120 USB, 0x422 handoff) y los del QUP (0xe3 wrapper,
+0xf6 GPI) NO estan -> todo DMA del QUP con direccion fisica se aborta: RX_SBE
+en el HS UART (AHB bus error) y "general error 0x40" del GSI/GPI del slate
+(bloqueo de la corona y del BT).
+
+Con -EPROBE_DEFER incondicional los devices esperan al SMMU y obtienen su
+dominio (como display/kgsl/USB/fastrpc, que ya lo tienen y funcionan).
+
+La alternativa sin parche (deferred_probe_timeout=N en el cmdline) se probo y
+NO vale: retrasa TODAS las dependencias y deja la cadena USB sin UDC (sin
+consola ni adb, parecia un cuelgue).
+
+Upstream-Status: Inappropriate [dace bring-up]
+---
+diff --git a/drivers/iommu/of_iommu.c b/drivers/iommu/of_iommu.c
+--- a/drivers/iommu/of_iommu.c
++++ b/drivers/iommu/of_iommu.c
+@@ -39,8 +39,36 @@
+ 	 * IOMMU device we're waiting for, which will be useful if we ever get
+ 	 * a proper probe-ordering dependency mechanism in future.
+ 	 */
+-	if (!ops)
+-		return driver_deferred_probe_check_state(dev);
++	if (!ops) {
++		/*
++		 * dace (TicWatch Pro 5 / monaco): NO usar
++		 * driver_deferred_probe_check_state() aqui. Ese helper devuelve
++		 * -ETIMEDOUT ("deferred probe timeout, ignoring dependency")
++		 * cuando driver_deferred_probe_timeout==0 y los initcalls ya han
++		 * terminado -- que es el caso de TODO lo que carga el initramfs
++		 * desde userspace. of_iommu_configure() solo respeta
++		 * -EPROBE_DEFER, asi que con -ETIMEDOUT el device se queda SIN
++		 * dominio IOMMU y sigue con direcciones FISICAS.
++		 *
++		 * En dace eso es fatal: el apps-smmu (arm_sm​mu.ko) no puede
++		 * probear hasta que qnoc-monaco registra el proveedor ICC, y el
++		 * firmware deja el SMMU con sCR0.USFCFG=1 (bit BLOQUEADO por TZ:
++		 * nuestro intento de limpiarlo no prende). USFCFG=1 aborta los
++		 * streams NO identificados -> los del QUP (0xe3 wrapper, 0xf6
++		 * GPI) y el wrapper es quien mapea los buffers del SPI/UART
++		 * (geni_se_tx/rx_dma_prep -> dma_map_single(wrapper->dev)) -> el
++		 * RX_SBE del HS UART (AHB bus error) y el "general error 0x40"
++		 * del GSI/GPI del slate.
++		 *
++		 * Con -EPROBE_DEFER incondicional esos devices esperan al SMMU y
++		 * reciben su dominio en su propio probe (como display/kgsl/USB,
++		 * que si funcionan). La alternativa global
++		 * (deferred_probe_timeout=N en el cmdline) NO sirve: retrasa
++		 * TODAS las dependencias y deja la cadena USB sin UDC (sin
++		 * consola ni adb: parece un cuelgue).
++		 */
++		return -EPROBE_DEFER;
++	}
+ 
+ 	if (!try_module_get(ops->owner))
+ 		return -ENODEV;

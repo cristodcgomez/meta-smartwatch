@@ -142,22 +142,6 @@ while read mod; do
         qnoc-monaco|msm_drm|msm_kgsl|msm_geni_serial)
             info "M-- ${name} (diferido al arranque del display)"
             continue ;;
-        # dace/STOCK: el apps-smmu lo programa el firmware/bootloader y los
-        # streams SIN SMR deben PASAR (bypass). El kernel STOCK de Mobvoi no
-        # lleva driver IOMMU en Linux (# CONFIG_ARM_SMMU is not set), pero el
-        # nuestro (google-eos) SI, y su sCR0 se escribe con USFCFG
-        # (CONFIG_ARM_SMMU_DISABLE_BYPASS_BY_DEFAULT=y) -> todo stream no
-        # mapeado recibe ABORT. Y los devices del QUP van con direccion FISICA
-        # (no tienen dominio): de ahi el RX_SBE del UART (Slave Bus Error = el
-        # abort del SMMU), el "general error" del GSI/GPI del slate y los
-        # cuelgues. El propio kernel lo dice en arm_smmu_global_fault():
-        #   'boot with "arm-smmu.disable_bypass=0" to allow'.
-        arm_smmu)
-            MI=$((MI+1))
-            ptext "CAN M${MI} ${name} disable_bypass=0"
-            info "M${MI} ${name} disable_bypass=0 (bypass como el firmware/stock)"
-            modprobe arm_smmu disable_bypass=0 2>/dev/kmsg
-            continue ;;
     esac
     MI=$((MI+1))
     ptext "CAN M${MI} ${name}"

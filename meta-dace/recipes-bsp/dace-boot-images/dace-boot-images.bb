@@ -347,17 +347,20 @@ do_compile() {
     # se probo en el bootconfig del vendor_boot y NO llega a /proc/cmdline.
     # blob de 2 DTBs. Sin el monacop el ABL cae a EDL.
     #
-    # arm_smmu.disable_bypass=0: el SMMU lo deja programado el firmware/bootloader
-    # del T5 y los streams SIN SMR deben PASAR (bypass). El kernel STOCK de Mobvoi
-    # no lleva driver IOMMU en Linux (# CONFIG_ARM_SMMU is not set) pero el nuestro
-    # (google-eos) si, y con CONFIG_ARM_SMMU_DISABLE_BYPASS_BY_DEFAULT=y escribe
-    # sCR0.USFCFG=1 -> LOS STREAMS NO MAPEADOS RECIBEN ABORT. Los devices del QUP
-    # van con direccion FISICA (no tienen dominio IOMMU), asi que recibian abort:
-    # eso es el RX_SBE del HS UART (Slave Bus Error), el "general error" del
-    # GSI/GPI del slate y los cuelgues de bus. El propio kernel lo recomienda en
-    # arm_smmu_global_fault(): 'boot with "arm-smmu.disable_bypass=0" to allow'.
-    # El parametro efectivo se pasa en init.sh (`modprobe arm_smmu
-    # disable_bypass=0`); aqui va tambien por si el kernel lo aplica al modulo.
+    # NI deferred_probe_timeout NI arm_smmu.disable_bypass (=0): los dos se
+    # probaron el 20-09-2026 y los dos estan descartados con datos:
+    #
+    #  * deferred_probe_timeout=30: retrasa TODAS las dependencias -> la cadena
+    #    USB se queda sin UDC y setup_usb_console() no encuentra /sys/class/udc
+    #    -> SIN consola ni adb (parecia un cuelgue; el arranque seguia).
+    #  * arm_smmu.disable_bypass=0: la telemetria del SMMU demostro que el bit
+    #    sCR0.USFCFG esta BLOQUEADO POR TZ (want=0x00e01836 -> read=0x00e01c06
+    #    conserva 0x400) -> no se puede quitar; los streams no identificados
+    #    (0xe3 QUP, 0xf6 GPI) se ABORTAN siempre.
+    # El arreglo bueno es el parche del kernel dace-iommu-defer.patch: los
+    # consumers del IOMMU devuelven -EPROBE_DEFER (en vez del -ETIMEDOUT de
+    # driver_deferred_probe_check_state) y asi esperan al apps-smmu y reciben
+    # su dominio (como display/kgsl/USB, que si funcionan).
     "${MKBOOTIMG}" \
         --header_version 4 --pagesize ${MKBOOTIMG_PAGESIZE} \
         --vendor_boot ${WORKDIR}/vendor_kernel_boot.img \
@@ -369,7 +372,7 @@ do_compile() {
         --ramdisk_offset ${MKBOOTIMG_RAMDISK_OFFSET} \
         --tags_offset ${MKBOOTIMG_TAGS_OFFSET} \
         --dtb_offset ${MKBOOTIMG_DTB_OFFSET} \
-        --vendor_cmdline 'lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=noforce kpti=off cgroup.memory=nokmem,nosocket loop.max_part=7 bootconfig qcom_geni_serial.con_enabled=0 androidboot.hardware=dace bootconfig buildvariant=user fw_devlink=permissive arm_smmu.disable_bypass=0 dace.debug=1'
+        --vendor_cmdline 'lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=noforce kpti=off cgroup.memory=nokmem,nosocket loop.max_part=7 bootconfig qcom_geni_serial.con_enabled=0 androidboot.hardware=dace bootconfig buildvariant=user fw_devlink=permissive dace.debug=1'
 
     # ─── Step 6: mkbootimg boot.img (v4): our kernel + empty ramdisk ───
     if [ ! -f "${LINUX_DACE_KIMG}" ]; then

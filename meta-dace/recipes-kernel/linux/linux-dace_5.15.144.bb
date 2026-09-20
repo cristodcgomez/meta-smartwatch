@@ -31,6 +31,7 @@ SRC_URI = "git://gitlab.com/ubports/porting/community-ports/android13/google-eos
            file://dace-module-cfi-abi-slot.patch \
            file://dwc3-core-probe-trace.patch \
            file://opp-icc-tolerant.patch \
+           file://dace-iommu-defer.patch \
            file://arm-smmu-skip-init.patch \
            file://dace-smmu-telemetry.patch \
            file://dace-hs-uart-fifo.patch \
