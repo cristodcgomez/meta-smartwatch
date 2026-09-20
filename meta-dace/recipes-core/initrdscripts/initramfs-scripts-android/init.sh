@@ -18,6 +18,22 @@
 
 info() { echo "init: $1" > /dev/kmsg 2>/dev/null; }
 ptext() { [ -w /sys/kernel/dace_text ] && printf '%s\n' "$1" > /sys/kernel/dace_text 2>/dev/null; }
+# ── Telemetria de bring-up por COLOR en el panel ─────────────────────────
+# /dev/fb0 = nodo /cont-splash-fb inyectado en el DTB (AURORA-STYLE, igual que
+# aurora-boot-images Step 3b): la region de continuous-splash que el SDE sigue
+# escaneando hasta que arranca el composer. Pintar un color SOLIDO deja ese
+# color en el panel aunque despues el SoC se cuelgue (sin USB, sin consola) ->
+# el color final identifica el ultimo paso alcanzado. Es el mismo truco que
+# dace_smmu_mark() en arm-smmu.c, pero desde userspace. Uso:
+#   fbmark R G B          dtrace "etiqueta" R G B
+fbmark() {
+    [ -c /dev/fb0 ] || return 0
+    _b=$(printf '%03o' $(( $3 & 255 ))); _g=$(printf '%03o' $(( $2 & 255 ))); _r=$(printf '%03o' $(( $1 & 255 )))
+    printf '%b' "\\$_b\\$_g\\$_r\\000" > /tmp/dace-fb.bin 2>/dev/null || return 0
+    dd if=/tmp/dace-fb.bin of=/dev/fb0 bs=4 count=262144 2>/dev/null
+}
+# dtrace: log al kmsg/consola + color en el panel (1 MB = cubre 466x466x4)
+dtrace() { info "$1"; fbmark "$2" "$3" "$4"; }
 SP=0
 mark() { SP=$((SP+1)); ptext "CAN S${SP} $*"; info "CAN S${SP} $*"; }
 
@@ -152,8 +168,9 @@ mark "usb gate + debugfs"
 # ════════════════════════════════════════════════════════════════════
 setup_usb_console
 sleep 2
-info "DISPLAY: consola arriba, cargando qnoc-monaco"
-modprobe qnoc-monaco 2>/dev/kmsg ; info "DISPLAY: qnoc-monaco rc=$?"
+dtrace "DISPLAY: consola arriba, cargando qnoc-monaco (color gris oscuro)" 32 32 32
+modprobe qnoc-monaco 2>/dev/kmsg ; _rc=$?
+dtrace "DISPLAY: qnoc-monaco rc=$_rc (color marron)" 160 82 45
 # El retry de arm_smmu es ASINCRONO (workqueue de deferred probe) y el wrapper
 # QUP (built-in, deferido desde los initcalls) se reintenta tambien. Esperar a
 # que el apps-smmu este BINDEADO antes de cargar los drivers del QUP: si no,
@@ -162,21 +179,25 @@ _i=0
 while [ $_i -lt 25 ] && [ ! -e /sys/bus/platform/drivers/arm-smmu/c600000.apps-smmu ]; do
     _i=$((_i+1)); sleep 1
 done
-info "IOMMU: apps-smmu bindeado tras ${_i}s ($(ls /sys/class/iommu/ 2>/dev/null | tr '\n' ' '))"
+dtrace "IOMMU: apps-smmu bindeado tras ${_i}s [$(ls /sys/class/iommu/ 2>/dev/null | tr '\n' ' ')] (color indigo)" 75 0 130
 # ── QUP/GPI: dominio IOMMU del apps-smmu (fix del reset del SPI del slate) ──
 # qnoc-monaco registra el proveedor ICC y DESBLOQUEA el probe del apps-smmu
 # (arm_smmu.ko, que esta diferido hasta este momento). A partir de aqui los
 # devices con "iommus" del QUP ya pueden obtener su iommu_group + dominio
 # fastmap en su propio probe. El GPI primero (es el motor DMA que usan los
 # SE en modo GSI: los drivers geni piden sus canales con dma_request_chan).
-modprobe msm_gpi 2>/dev/kmsg      ; info "DISPLAY: msm_gpi rc=$?"
-modprobe i2c-msm-geni 2>/dev/kmsg ; info "DISPLAY: i2c-msm-geni rc=$?"
-modprobe spi-msm-geni 2>/dev/kmsg ; info "DISPLAY: spi-msm-geni rc=$?"
+modprobe msm_gpi 2>/dev/kmsg      ; _rc=$?
+dtrace "DISPLAY: msm_gpi rc=$_rc (color coral)" 255 127 80
+modprobe i2c-msm-geni 2>/dev/kmsg ; _rc=$?
+dtrace "DISPLAY: i2c-msm-geni rc=$_rc (color orquidea)" 186 85 211
+modprobe spi-msm-geni 2>/dev/kmsg ; _rc=$?
+dtrace "DISPLAY: spi-msm-geni rc=$_rc (color dorado)" 218 165 32
 # msm_geni_serial DESPUES del qnoc: su geni_icc_get("qup-config") debe ver los
 # nodos del qnoc ya registrados. Si no, of_icc_get devuelve -EINVAL (provider
 # arriba pero nodo aun no) y el probe del UART FALLA sin reintento -> no aparece
 # /dev/ttyHS0 (BT).
-modprobe msm_geni_serial 2>/dev/kmsg ; info "DISPLAY: msm_geni_serial rc=$?"
+modprobe msm_geni_serial 2>/dev/kmsg ; _rc=$?
+dtrace "DISPLAY: msm_geni_serial rc=$_rc (color caqui)" 240 230 140
 # Comprobacion del fix: los cuatro deben tener iommu_group.
 for _d in 4ac0000.qcom,qupv3_0_geni_se 4a90000.spi 4a00000.qcom,gpi-dma 4a94000.qcom,qup_uart; do
     if [ -e /sys/bus/platform/devices/$_d/iommu_group ]; then
@@ -185,8 +206,11 @@ for _d in 4ac0000.qcom,qupv3_0_geni_se 4a90000.spi 4a00000.qcom,gpi-dma 4a94000.
         info "IOMMU: $_d SIN grupo (el fix de orden no ha funcionado)"
     fi
 done
-modprobe msm_drm 2>/dev/kmsg     ; info "DISPLAY: msm_drm rc=$?"
-modprobe msm_kgsl 2>/dev/kmsg    ; info "DISPLAY: msm_kgsl rc=$?"
+dtrace "DISPLAY: fin de la carga del QUP (color azul claro) — si el panel se queda AQUI, el cuelgue esta en msm_drm" 176 196 222
+modprobe msm_drm 2>/dev/kmsg     ; _rc=$?
+dtrace "DISPLAY: msm_drm rc=$_rc (color verde claro)" 100 200 100
+modprobe msm_kgsl 2>/dev/kmsg    ; _rc=$?
+dtrace "DISPLAY: fin de la carga (color blanco azulado) — si el panel se queda AQUI, no hubo cuelgue" 210 220 255
 info "DISPLAY: fin de la carga (si sigues viendo esto, no hubo reset)"
 sleep 2
 

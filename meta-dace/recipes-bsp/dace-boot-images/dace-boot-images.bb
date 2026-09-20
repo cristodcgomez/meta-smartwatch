@@ -296,6 +296,27 @@ do_compile() {
         # La solucion es forzar el mux desde el propio driver en
         # msm_geni_serial_probe() -> dace-hs-uart-pinctrl.patch (en linux-dace).
         bbnote "$dtb: BT UART pinctrl lo fuerza el driver (dace-hs-uart-pinctrl.patch)"
+        # ── /cont-splash-fb → /dev/fb0 sobre el continuous-splash ──────────
+        # AURORA-STYLE (Step 3b de aurora-boot-images.bb): el bootloader pinta
+        # el logo en splash_region@0x5c000000 (label cont_splash_region) y el
+        # SDE sigue escaneando ESA region hasta que el composer arranca. El
+        # driver qcom-cont-splash-fb (CONFIG_FB_QCOM_CONT_SPLASH=y, ya en
+        # nuestro kernel con 0001-video-fbdev-...) la expone como /dev/fb0,
+        # pero SOLO si el nodo DT existe: aurora lo inyecta en su boot-images y
+        # nosotros no lo teniamos.
+        # Doble uso: (a) telemetria del bring-up (el panel conserva el ultimo
+        # color pintado tras un cuelgue = unico canal cuando no hay USB), y
+        # (b) splash de usuario (psplash) si algun dia hace falta.
+        # Panel = 466x466 (rm69090-amoled-178-cmd), xRGB8888, stride 466*4.
+        S_NODE=/cont-splash-fb
+        "$FDTPUT" -c ${WORKDIR}/${dtb}-per.dtb "$S_NODE"
+        "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb "$S_NODE" compatible "qcom,cont-splash-fb"
+        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb "$S_NODE" reg 0 0x5c000000 0 0x100000
+        "$FDTPUT" -t u ${WORKDIR}/${dtb}-per.dtb "$S_NODE" width 466
+        "$FDTPUT" -t u ${WORKDIR}/${dtb}-per.dtb "$S_NODE" height 466
+        "$FDTPUT" -t u ${WORKDIR}/${dtb}-per.dtb "$S_NODE" stride 1864
+        "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb "$S_NODE" format "x8r8g8b8"
+        bbnote "$dtb: nodo /cont-splash-fb inyectado (fb0 = splash 0x5c000000, 466x466)"
         bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, sin OPP) + RAYDIUM rm32380 @0x39 (i2c-1) + zinitix disabled + BT rieles"
     done
     cat ${WORKDIR}/monaco-real-per.dtb ${WORKDIR}/monacop-per.dtb > ${WORKDIR}/dtb-blob-vendor.bin
