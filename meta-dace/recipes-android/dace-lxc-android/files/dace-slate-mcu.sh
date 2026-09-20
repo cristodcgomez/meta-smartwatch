@@ -127,7 +127,8 @@ fi
 # 7) Esperar a que el controlador quede operativo (hci0 con BD address).
 i=0
 while [ $i -lt 40 ]; do
-    if hciconfig 2>/dev/null | grep -qE "BD Address: ([0-9A-Fa-f]{2}:){5}"; then
+    if hciconfig 2>/dev/null | grep -qE "BD Address: ([0-9A-Fa-f]{2}:){5}" && \
+       ! hciconfig 2>/dev/null | grep -q "BD Address: 00:00:00:00:00:00"; then
         log "hci0 LISTO: $(hciconfig 2>/dev/null | sed -n 2p | tr -s " ")"
         break
     fi
