@@ -104,6 +104,17 @@ if [ "$(cat /sys/kernel/slate_bt_state/slate_bt_state 2>/dev/null)" = "ready" ];
     # estaba listo, y NO reintenta solo (el proceso queda vivo pero idle). Con
     # el MCU ya arriba hay que relanzarlo: es exactamente la secuencia verificada
     # en vivo (bring-up completo -> hci0 UP RUNNING con su BD Address).
+    # Alimentar (ciclar) el chip de BT: con soc=slate el HAL no vota
+    # reguladores y los rieles pm5100_l13/l17 se quedan APAGADOS -> chip mudo.
+    # Es lo que hace aurora via /dev/btpower. El ciclo 0->1 ademas resetea el
+    # chip, que vuelve a arrancar a 2400 bps (estado que espera el HAL).
+    if [ -x /usr/libexec/dace-bt-power.pl ]; then
+        if /usr/bin/perl /usr/libexec/dace-bt-power.pl cycle >> /run/dace-slate-mcu.log 2>&1; then
+            log "chip BT alimentado (BT_CMD_PWR_CTRL cycle)"
+        else
+            log "AVISO: fallo el power del chip BT (/dev/btpower)"
+        fi
+    fi
     # HAL de BT y su CLIENTE, relanzados SIN lxc-attach (medido 20-09-2026:
     # `lxc-attach` se cuelga cuando lo lanza un unit de systemd con el sistema
     # cargado -- dbus/systemd saturados: desde el shell funciona, desde un

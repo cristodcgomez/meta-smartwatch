@@ -55,6 +55,7 @@ SRC_URI = "\
   file://0005-amplifiers-cl_dsp-return-ENOENT-when-coeff-control-i.patch \
   file://0006-amplifiers-cs40l26-pin-codec-MFD-child-platform-id.patch \
   file://0007-bt-btpower-tolerate-fixed-regulator-set-voltage.patch \
+  file://0008-bt-btpower-qcc5100-full-vregs.patch \
 "
 KBR = "android-msm-eos-5.15-tm-wear-kr3-dr-eos"
 SRCREV_audio       = "78c8eece9b0ee28d887176fe19b3dd77b80ffbdc"
