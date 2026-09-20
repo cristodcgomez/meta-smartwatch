@@ -198,16 +198,31 @@ wait_udc && setup_usb_console
 # /dev/ttyHS0 (BT).
 modprobe msm_geni_serial 2>/dev/kmsg ; _rc=$?
 dtrace "DISPLAY: msm_geni_serial rc=$_rc (color caqui)" 240 230 140
-# Informativo: en dace estos devices deben quedar SIN dominio IOMMU (es lo
-# correcto: como el stock, el SMMU del firmware les hace bypass con direcciones
-# fisicas). Que TENGAN grupo/dominio es justo lo que rompia el arranque.
-for _d in 4ac0000.qcom,qupv3_0_geni_se 4a90000.spi 4a00000.qcom,gpi-dma 4a94000.qcom,qup_uart; do
+# Informativo (dace, 20-09-2026): con dace-iommu-defer.patch SOLO los streams del
+# QUP (0xe3 wrapper, 0xf6 GPI) deben acabar CON dominio IOMMU; el resto (eMMC,
+# USB, qcrypto, tmc...) debe seguir SIN dominio (el firmware ya los traduce; si
+# Linux los engancha les cambia el CB y el arranque se cuelga).
+# Los drivers del QUP cargan en el bucle temprano y quedan diferidos hasta que
+# el apps-smmu registra, asi que esperamos (acotado) a su re-probe.
+_i=0
+while [ $_i -lt 15 ]; do
+    [ -e /sys/bus/platform/devices/4ac0000.qcom,qupv3_0_geni_se/iommu_group ] && \
+    [ -e /sys/bus/platform/devices/4a00000.qcom,gpi-dma/iommu_group ] && break
+    _i=$((_i+1)); sleep 1
+done
+info "IOMMU: espera de dominios del QUP: ${_i}s"
+for _d in 4ac0000.qcom,qupv3_0_geni_se 4a00000.qcom,gpi-dma 4a90000.spi 4a94000.qcom,qup_uart; do
     if [ -e /sys/bus/platform/devices/$_d/iommu_group ]; then
-        info "IOMMU: $_d CON grupo ($(readlink /sys/bus/platform/devices/$_d/iommu_group)) — NO deberia"
+        info "IOMMU: $_d CON grupo ($(readlink /sys/bus/platform/devices/$_d/iommu_group))"
     else
-        info "IOMMU: $_d SIN grupo (correcto: bypass del firmware, como stock)"
+        info "IOMMU: $_d SIN grupo"
     fi
 done
+if [ -e /sys/bus/platform/devices/4744000.sdhci/iommu_group ]; then
+    info "IOMMU: eMMC (4744000.sdhci) CON grupo -- OJO: no deberia (el firmware ya lo traduce)"
+else
+    info "IOMMU: eMMC (4744000.sdhci) SIN grupo (correcto: lo traduce el firmware)"
+fi
 dtrace "DISPLAY: fin de la carga previa al DRM (color azul claro = ULTIMO color visible)" 176 196 222
 modprobe msm_drm 2>/dev/kmsg     ; _rc=$?
 # OJO: a partir de aqui el SDE/DRM se queda la pantalla y deja de escanear el

@@ -1,69 +1,74 @@
 From: TicWatch Pro 5 (dace) port
-Subject: [PATCH] iommu/of: devolver -EPROBE_DEFER incondicional (dace bring-up)
+Subject: [PATCH] iommu/of: -EPROBE_DEFER SOLO para los streams del QUP (dace bring-up)
 
 En dace el apps-smmu es un modulo que no puede probear hasta que qnoc-monaco
 registra el proveedor ICC (carga del initramfs). Los devices con "iommus" que
-probean antes (el wrapper QUP es built-in, y msm_gpi/i2c-spi-msm-geni cargan en
-el bucle) reciben de of_iommu_xlate() el -ETIMEDOUT de
-driver_deferred_probe_check_state() (porque los modulos cargan DESPUES de los
-initcalls y driver_deferred_probe_timeout==0) y se quedan SIN dominio IOMMU.
+probean antes se quedan sin dominio IOMMU porque of_iommu_xlate() devuelve el
+-ETIMEDOUT de driver_deferred_probe_check_state() (los modulos cargan despues
+de los initcalls y driver_deferred_probe_timeout==0) y of_iommu_configure()
+solo respeta -EPROBE_DEFER.
 
 Y en este SoC quedarse sin dominio NO es inofensivo: el firmware deja el
-apps-smmu con CLIENTPD=0 y USFCFG=1, y ese bit esta BLOQUEADO por TZ (nuestro
-intento de limpiarlo no prende: read-back 0x00e01c06 con el bit 0x400 puesto).
-USFCFG=1 ABORTA los streams no identificados. La tabla del firmware solo tiene
-4 SMR (0xc0 eMMC, 0xa0 y 0x120 USB, 0x422 handoff) y los del QUP (0xe3 wrapper,
-0xf6 GPI) NO estan -> todo DMA del QUP con direccion fisica se aborta: RX_SBE
-en el HS UART (AHB bus error) y "general error 0x40" del GSI/GPI del slate
-(bloqueo de la corona y del BT).
+apps-smmu con CLIENTPD=0 y USFCFG=1 (bit BLOQUEADO por TZ: el read-back no
+cambia) -> los streams NO identificados se ABORTAN. La tabla del firmware solo
+tiene 4 SMR (0xc0 eMMC, 0xa0/0x120 USB, 0x422 handoff), asi que:
 
-Con -EPROBE_DEFER incondicional los devices esperan al SMMU y obtienen su
-dominio (como display/kgsl/USB/fastrpc, que ya lo tienen y funcionan).
+  - eMMC, USB, qcrypto, tmc... : YA estan en el CB del firmware y funcionan con
+    direccion fisica. Si Linux los engancha a un dominio le CAMBIA el CB y el
+    arranque se cuelga (medido el 20-09-2026 con el parche incondicional) ->
+    hay que dejarlos como estaban (-ETIMEDOUT, siguen sin dominio).
+  - 0xe3 (wrapper qcom,qupv3_0_geni_se, quien mapea los buffers del SPI/UART:
+    geni_se_tx/rx_dma_prep -> dma_map_single(wrapper->dev)) y 0xf6 (GPI-DMA del
+    slate): NO estan en la tabla -> su DMA se ABORTA (RX_SBE en el HS UART,
+    "general error" 0x40 del GSI/GPI del slate -> corona y BT bloqueados). Para
+    ellos SI hay que esperar al apps-smmu y darles dominio.
+
+Por eso el -EPROBE_DEFER se limita a esos dos stream IDs.
 
 La alternativa sin parche (deferred_probe_timeout=N en el cmdline) se probo y
-NO vale: retrasa TODAS las dependencias y deja la cadena USB sin UDC (sin
-consola ni adb, parecia un cuelgue).
+NO vale: retrasa TODAS las dependencias y deja la cadena USB sin UDC.
 
 Upstream-Status: Inappropriate [dace bring-up]
 ---
 diff --git a/drivers/iommu/of_iommu.c b/drivers/iommu/of_iommu.c
 --- a/drivers/iommu/of_iommu.c
 +++ b/drivers/iommu/of_iommu.c
-@@ -39,8 +39,36 @@
+@@ -39,8 +39,38 @@
  	 * IOMMU device we're waiting for, which will be useful if we ever get
  	 * a proper probe-ordering dependency mechanism in future.
  	 */
 -	if (!ops)
--		return driver_deferred_probe_check_state(dev);
 +	if (!ops) {
 +		/*
-+		 * dace (TicWatch Pro 5 / monaco): NO usar
-+		 * driver_deferred_probe_check_state() aqui. Ese helper devuelve
-+		 * -ETIMEDOUT ("deferred probe timeout, ignoring dependency")
-+		 * cuando driver_deferred_probe_timeout==0 y los initcalls ya han
-+		 * terminado -- que es el caso de TODO lo que carga el initramfs
-+		 * desde userspace. of_iommu_configure() solo respeta
-+		 * -EPROBE_DEFER, asi que con -ETIMEDOUT el device se queda SIN
-+		 * dominio IOMMU y sigue con direcciones FISICAS.
++		 * dace (TicWatch Pro 5 / monaco): -EPROBE_DEFER SOLO para los streams
++		 * del QUP (0xe3 = wrapper qcom,qupv3_0_geni_se, 0xf6 = GPI-DMA) y
++		 * para el resto mantener el comportamiento original
++		 * (driver_deferred_probe_check_state -> -ETIMEDOUT = "sigue sin
++		 * dominio").
 +		 *
-+		 * En dace eso es fatal: el apps-smmu (arm_sm​mu.ko) no puede
-+		 * probear hasta que qnoc-monaco registra el proveedor ICC, y el
-+		 * firmware deja el SMMU con sCR0.USFCFG=1 (bit BLOQUEADO por TZ:
-+		 * nuestro intento de limpiarlo no prende). USFCFG=1 aborta los
-+		 * streams NO identificados -> los del QUP (0xe3 wrapper, 0xf6
-+		 * GPI) y el wrapper es quien mapea los buffers del SPI/UART
-+		 * (geni_se_tx/rx_dma_prep -> dma_map_single(wrapper->dev)) -> el
-+		 * RX_SBE del HS UART (AHB bus error) y el "general error 0x40"
-+		 * del GSI/GPI del slate.
-+		 *
-+		 * Con -EPROBE_DEFER incondicional esos devices esperan al SMMU y
-+		 * reciben su dominio en su propio probe (como display/kgsl/USB,
-+		 * que si funcionan). La alternativa global
-+		 * (deferred_probe_timeout=N en el cmdline) NO sirve: retrasa
-+		 * TODAS las dependencias y deja la cadena USB sin UDC (sin
-+		 * consola ni adb: parece un cuelgue).
++		 * Por que solo esos: la telemetria del apps-smmu (parche
++		 * dace-smmu-telemetry) demuestra que el firmware deja sCR0.USFCFG=1
++		 * (bit BLOQUEADO por TZ: no se puede limpiar) y que su tabla tiene
++		 * solo 4 SMR: 0xc0 eMMC, 0xa0/0x120 USB y 0x422 handoff. Es decir:
++		 * eMMC/USB/etc. funcionan SIN dominio porque el CB del firmware ya
++		 * los traduce (por eso al engancharlos a un dominio de Linux se les
++		 * CAMBIA el CB y el arranque se cuelga: medido el 20-09 con el parche
++		 * incondicional). Los streams 0xe3/0xf6 NO estan en esa tabla: su DMA
++		 * con direccion fisica se ABORTA (RX_SBE en el HS UART, "general
++		 * error" 0x40 del GSI/GPI del slate -> corona y BT bloqueados) y para
++		 * que funcionen Linux TIENE que programarles su SMR/S2CR, o sea que
++		 * necesitan dominio IOMMU.
 +		 */
-+		return -EPROBE_DEFER;
++		u32 dace_sid = (iommu_spec->args_count > 0) ?
++				iommu_spec->args[0] : 0xffffffff;
++
++		if (dace_sid == 0xe3 || dace_sid == 0xf6) {
++			dev_err(dev,
++				"DACE-IOMMU: sid=0x%x -> -EPROBE_DEFER (espera al apps-smmu)\n",
++				dace_sid);
++			return -EPROBE_DEFER;
++		}
+ 		return driver_deferred_probe_check_state(dev);
 +	}
  
  	if (!try_module_get(ops->owner))
