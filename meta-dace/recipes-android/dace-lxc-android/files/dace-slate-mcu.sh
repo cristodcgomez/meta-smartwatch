@@ -42,18 +42,26 @@ log() { echo "dace-slate-mcu: $*"; }
 #    servicio a gritos ('Could not find ...IPowerStateService/default').
 #    OJO: todos los lxc-attach van con `timeout`: en 2 de 3 arranques se quedo
 #    colgado indefinidamente y el servicio nunca llegaba a arrancar el MCU.
+#    Y solo 3 intentos (8 s): mas intentos = cada uno consume el timeout del
+#    unit y acababamos en 'start operation timed out' sin arrancar el MCU.
 i=0
-while [ $i -lt 60 ]; do
-    timeout 15 lxc-attach -n android -- /system/bin/getprop 2>/dev/null | grep -q . && break
+while [ $i -lt 3 ]; do
+    timeout 8 lxc-attach -n android -- /system/bin/getprop 2>/dev/null | grep -q . && break
     i=$((i + 1))
     sleep 2
 done
-if timeout 15 lxc-attach -n android -- /system/bin/setprop ctl.start powerstateservice-hal-1-0 2>/dev/null; then
-    sleep 2
-    log "powerstateservice-hal-1-0 init.svc=$(timeout 15 lxc-attach -n android -- /system/bin/getprop init.svc.powerstateservice-hal-1-0 2>/dev/null)"
+if timeout 8 lxc-attach -n android -- /system/bin/setprop ctl.start powerstateservice-hal-1-0 2>/dev/null; then
+    log "powerstateservice-hal-1-0 ctl.start enviado"
 else
-    log "AVISO: no se pudo arrancar powerstateservice-hal-1-0 (el MCU puede resetear el SoC)"
+    log "AVISO: ctl.start de pss no respondio (el .rc con 'interface' deberia arrancarlo solo)"
 fi
+# Comprobar por sysfs/proc, sin lxc-attach: el fichero /dev/power_state y
+# /dev/slate_com_dev los abre el propio servicio.
+for _i in 1 2 3 4 5; do
+    [ -c /dev/power_state ] && break
+    sleep 2
+done
+log "pss: /dev/power_state $([ -c /dev/power_state ] && echo presente || echo ausente)"
 
 # 3) Esperar a que exista el remoteproc del MCU (qcom_rproc_slate lo crea al
 #    probe; su .ko tambien lo pide udev, pero puede ir con retraso).
@@ -99,21 +107,21 @@ if [ "$(cat /sys/kernel/slate_bt_state/slate_bt_state 2>/dev/null)" = "ready" ];
     # estaba listo, y NO reintenta solo (el proceso queda vivo pero idle). Con
     # el MCU ya arriba hay que relanzarlo: es exactamente la secuencia verificada
     # en vivo (bring-up completo -> hci0 UP RUNNING con su BD Address).
-    if timeout 20 lxc-attach -n android -- /system/bin/setprop ctl.restart vendor.bluetooth-1-0-qti 2>/dev/null; then
-        log "HAL de BT relanzado (slate listo) -> deberia subir hci0"
-    else
-        log "AVISO: no se pudo relanzar el HAL de BT (arrancalo a mano)"
-    fi
-    # bluebinder (host) es el CLIENTE del HAL: si arranco antes que el HAL (o
-    # antes de que el MCU estuviera listo) se queda en "Waiting for bluetooth
-    # service" PARA SIEMPRE (documentado en AGENTS §7) y el HAL nunca llega a
-    # inicializar -> hci0 se queda sin BD address. Se reinicia para que se
-    # reconecte al HAL recien relanzado.
-    if systemctl restart bluebinder 2>/dev/null; then
-        log "bluebinder reiniciado (el cliente del HAL BT)"
-    else
-        log "AVISO: no se pudo reiniciar bluebinder"
-    fi
+    # HAL de BT y su CLIENTE, relanzados SIN lxc-attach (medido 20-09-2026:
+    # `lxc-attach` se cuelga cuando lo lanza un unit de systemd con el sistema
+    # cargado -- dbus/systemd saturados: desde el shell funciona, desde un
+    # service no). En su lugar los matamos por /proc: el init del contenedor
+    # relanza el HAL (esta verificado: cambia de pid) y systemd relanza
+    # bluebinder (Restart=always). Sin un bluebinder FRESCO el HAL no llega a
+    # inicializar ("Waiting for bluetooth service" para siempre) y hci0 se
+    # queda sin BD address. Con ambos frescos + slate listo -> hci0 UP RUNNING.
+    for _p in /proc/[0-9]*; do
+        _c=$(cat "$_p/comm" 2>/dev/null)
+        case "$_c" in
+            *bluetooth@1.0*) kill -9 "${_p#/proc/}" 2>/dev/null && log "HAL BT relanzado (kill ${_p#/proc/})" ;;
+            bluebinder)      kill -9 "${_p#/proc/}" 2>/dev/null && log "bluebinder relanzado (kill ${_p#/proc/})" ;;
+        esac
+    done
     log "slate OK (BT listo)"
 else
     log "AVISO: slate_bt_state no esta ready (revisar el enlace glink)"
