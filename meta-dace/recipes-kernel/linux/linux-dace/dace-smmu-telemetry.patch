@@ -1,0 +1,117 @@
+From: TicWatch Pro 5 (dace) port
+Subject: [PATCH] iommu/arm/arm-smmu: volcar la tabla SMR/S2CR y sCR0 (dace bring-up)
+
+Telemetria PURA (sin cambio de comportamiento) para resolver el fallo del DMA
+del QUP en dace: el UART HS da RX_SBE (bus error) y el GSI/GPI del slate
+"general error" (0x40) cuando los devices usan direcciones FISICAS (no tienen
+dominio IOMMU porque el arm_smmu se registra tarde). Hipotesis a resolver:
+
+  a) el stream no esta identificado por ninguna SMR y sCR0.USFCFG=1 lo aborta
+     (el stock no tiene driver IOMMU -> sCR0 queda con el valor del firmware),
+  b) el stream SI esta en la tabla del firmware y su CB traduce a un rango que
+     no cubre la direccion fisica.
+
+Se imprimen tres cosas (prefijo DACE-SMMU, nivel err para que lleguen a la
+consola USB del initramfs):
+  - DACE-SMMU-SCR0 (del firmware) y (want/read tras nuestra escritura): si el
+    read no coincide, el SMMU esta bloqueado por TZ y el bypass NO se puede
+    cambiar con arm_smmu.disable_bypass=0.
+  - DACE-SMMU-SMR: cada entrada real (idx/id/mask/tipo/privcfg/cbndx/pinned).
+  - DACE-SMMU-MATCH: si los streams que nos importan (0x000/0x001 display,
+    0x0c0/0x0c1 eMMC, 0x0e3 wrapper QUP+UART, 0x0f6 GPI-DMA del slate,
+    0x420/0x422 handoff del DT, 0x800/0x801/0x980/0x981 USB/SDE) coinciden con
+    alguna entrada.
+
+Upstream-Status: Inappropriate [dace bring-up]
+---
+diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu.c b/drivers/iommu/arm/arm-smmu/arm-smmu.c
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu.c
+@@ -2918,6 +2918,17 @@
+ 	arm_smmu_gr0_write(smmu, ARM_SMMU_GR0_TLBIALLNSNH, QCOM_DUMMY_VAL);
+ 
+ 	reg = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_sCR0);
++	/*
++	 * dace TELEMETRIA (dace-smmu-telemetry.patch): valor de sCR0 que dejo el
++	 * firmware/bootloader ANTES de que Linux lo reescriba. Si USFCFG=1 los
++	 * streams NO identificados reciben ABORT en vez de pasar (bypass); el
++	 * kernel STOCK no tiene driver IOMMU -> este registro se queda como el
++	 * firmware lo puso y por eso el stock funciona con direcciones fisicas.
++	 */
++	dev_err(smmu->dev,
++		"DACE-SMMU-SCR0 (del firmware) = 0x%08x USFCFG=%d CLIENTPD=%d\n",
++		reg, !!(reg & ARM_SMMU_sCR0_USFCFG),
++		!(reg & ARM_SMMU_sCR0_CLIENTPD));
+ 
+ 	/* Enable fault reporting */
+ 	reg |= (ARM_SMMU_sCR0_GFRE | ARM_SMMU_sCR0_GFIE |
+@@ -2955,6 +2966,14 @@
+ 	/* Push the button */
+ 	arm_smmu_tlb_sync_global(smmu);
+ 	arm_smmu_gr0_write(smmu, ARM_SMMU_GR0_sCR0, reg);
++	/* dace TELEMETRIA: leer de vuelta para ver si el SMMU acepta la escritura
++	 * (si esta bloqueado por TZ, read != want y el bypass no se puede cambiar
++	 * desde un parametro del modulo). */
++	dev_err(smmu->dev,
++		"DACE-SMMU-SCR0 want=0x%08x read=0x%08x USFCFG=%d CLIENTPD=%d disable_bypass=%d\n",
++		reg, arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_sCR0),
++		!!(reg & ARM_SMMU_sCR0_USFCFG), !(reg & ARM_SMMU_sCR0_CLIENTPD),
++		disable_bypass);
+ }
+ 
+ static int arm_smmu_id_size_to_bits(int size)
+@@ -3592,6 +3611,54 @@
+ 	dev_err(smmu->dev,
+ 		"DACE-SMMU %s: tabla del firmware: %d/%d SMR en uso, %d context banks reservados\n",
+ 		dev_name(smmu->dev), used, smmu->num_mapping_groups, cbs);
++
++	/*
++	 * dace TELEMETRIA (dace-smmu-telemetry.patch): volcar la tabla SMR/S2CR
++	 * REAL que dejo el firmware y comprobar si los streams que nos interesan
++	 * estan MATCHed. Clave para decidir el arreglo:
++	 *   - si 0xe3 (wrapper QUP/UART) y 0xf6 (GPI) NO estan matched, el fallo
++	 *     del DMA (RX_SBE del UART, GError del GSI del slate) es el ABORT de
++	 *     sCR0.USFCFG sobre streams no identificados -> el arreglo es dejar
++	 *     pasar (bypass) o darles dominio; y si el firmware dejo USFCFG=0 en
++	 *     sCR0 (ver DACE-SMMU-SCR0) el stock tampoco los identificaba.
++	 *   - si SI estan matched, la transaccion se traduce con el CB del
++	 *     firmware y lo que falla es que esa traduccion no cubre la direccion
++	 *     fisica -> el arreglo es darles dominio IOMMU a los devices.
++	 */
++	for (i = 0; i < smmu->num_mapping_groups; ++i) {
++		if (!smmu->smrs[i].valid)
++			continue;
++		dev_err(smmu->dev,
++			"DACE-SMMU-SMR idx=%d id=0x%x mask=0x%x s2cr[type=%u privcfg=%u cbndx=%u pinned=%d count=%u]\n",
++			i, smmu->smrs[i].id, smmu->smrs[i].mask,
++			smmu->s2crs[i].type, smmu->s2crs[i].privcfg,
++			smmu->s2crs[i].cbndx, smmu->s2crs[i].pinned,
++			smmu->s2crs[i].count);
++	}
++	{
++		static const u16 dace_sids[] = {
++			0x000, 0x001, 0x0c0, 0x0c1, 0x0e3, 0x0f6, 0x420, 0x422,
++			0x800, 0x801, 0x980, 0x981,
++		};
++		u16 sid;
++
++		for (i = 0; i < ARRAY_SIZE(dace_sids); ++i) {
++			int j, hit = -1;
++
++			sid = dace_sids[i];
++			for (j = 0; j < smmu->num_mapping_groups; ++j) {
++				if (!smmu->smrs[j].valid)
++					continue;
++				if (!((sid ^ smmu->smrs[j].id) & ~smmu->smrs[j].mask)) {
++					hit = j;
++					break;
++				}
++			}
++			dev_err(smmu->dev,
++				"DACE-SMMU-MATCH sid=0x%03x -> idx=%d [%s]\n",
++				sid, hit, hit >= 0 ? "MATCHED" : "NO MATCH (USFCFG decide)");
++		}
++	}
+ }
+ 
+ static int arm_smmu_device_probe(struct platform_device *pdev)
