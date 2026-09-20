@@ -1,23 +1,27 @@
 [Unit]
-Description=dace: arranca el MCU del slate (remoteproc2) - habilita corona y BT
+Description=dace: arranca el MCU del slate (remoteproc2) para el Bluetooth
 Documentation=file:///usr/libexec/dace-slate-mcu.sh
 DefaultDependencies=no
 # El firmware del MCU (slatefw.mdt) lo sirve dace-vendor-mount (firmware_class.path
 # + /vendor/firmware_mnt). Los .ko del slate los carga udev/modprobe mucho antes.
-After=dace-lxc-android.service
+After=dace-lxc-android.service graphical.target dace-lxc-hal-start.service
 Requires=dace-lxc-android.service
-Before=dace-lxc-hal-start.service
 ConditionPathExists=/sys/class/remoteproc/remoteproc2/state
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# MARGEN: arrancar el MCU a los ~23 s (en plena subida del contenedor) acababa
+# en un Oops del kernel (salto a 0) unos segundos despues. Con el sistema ya
+# arriba (graphical.target + este margen) es estable: es la ventana en la que se
+# verifico en vivo el bring-up completo del chip (Get Version -> patch -> hci0
+# UP RUNNING). El HAL de BT reintenta cada ~60 s, asi que no hace falta que el
+# MCU este antes que el.
+ExecStartPre=/bin/sleep 20
 ExecStart=/usr/libexec/dace-slate-mcu.sh
 StandardOutput=journal+console
 StandardError=journal+console
-# El arranque del MCU tarda ~2 s; si algo se cuelga no queremos bloquear el boot
-# (systemd mata el script; el reloj arranca igual, sin corona ni BT).
-TimeoutStartSec=90
+TimeoutStartSec=120
 
 [Install]
 WantedBy=multi-user.target

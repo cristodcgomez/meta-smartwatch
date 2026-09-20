@@ -1,38 +1,34 @@
 #!/bin/sh
-# dace: arranca el MCU del slate (remoteproc2) -- de el cuelgan la CORONA y el
-# BLUETOOTH (en el reloj, persist.vendor.qcom.bluetooth.soc=slate: el HAL no
-# habla con el chip por la UART del AP, sino por el transporte MCT a traves del
-# enlace glink del MCU).
+# dace: arranca el MCU del slate (remoteproc2) para el BLUETOOTH.
 #
-# EL ORDEN ES CRITICO (medido 20-09-2026):
-#   1) los .ko del slate (y los del RSB, que no se autocargan) tienen que estar
-#      cargados ANTES de arrancar el MCU, porque los notifier SSR se registran
-#      en el probe de cada modulo;
+# En el reloj, persist.vendor.qcom.bluetooth.soc=slate: el HAL de BT no habla
+# con el chip por la UART del AP, sino por el transporte MCT a traves del
+# enlace glink del MCU, y el MCU es quien alimenta/relojea el chip. Sin MCU el
+# chip esta MUDO (Get Version nunca contesta).
+#
+# EL ORDEN Y EL MOMENTO IMPORTAN (medido 20-09-2026):
+#   1) los .ko del slate ya estan cargados (udev) cuando corre esto;
 #   1b) `powerstateservice-hal-1-0` (pss) tiene que estar ARRANCADO: es el peer
-#      de estado del MCU. Sin el, el MCU no tiene quien le conteste los cambios
-#      de estado y el SoC se RESETEA ~8 s despues de levantar el enlace;
+#      de estado del MCU. Su .rc NO trae linea 'interface' -> ctl.start.
+#      Sin el, el MCU se queda sin quien le conteste y el SoC acaba en un Oops
+#      (salto a la direccion 0) a los pocos segundos;
 #   2) al hacer `echo start` en el rproc, el subdev SSR de qcom_rproc_slate
-#      notifica "slatefw" QCOM_SSR_AFTER_POWERUP y eso dispara:
-#        - slatecom_interface: slatecom_set_spi_state(SLATECOM_SPI_FREE), que
-#          pide la IRQ "qcom-slate_spi"; su tasklet LEE los registros de estado
-#          del MCU por SPI (el camino que antes abortaba el SMMU) y con eso
-#          levanta el enlace glink (canales slate-ctrl/slate-event/slate-rsb-ctl)
-#          y publica slate_bt_state=ready / slate_dsp_state=ready;
-#        - slate_rsb: manda SLATERSB_CONFIGR_RSB al MCU.
-#   3) el `enable` del RSB (corona) se pide ANTES a proposito: si el driver aun
-#      no esta configurado guarda el pedido en pending_enable y lo aplica solo
-#      en cuanto llega el CONFIGR (el write devuelve ENOMEDIUM, es normal).
+#      notifica "slatefw" QCOM_SSR_AFTER_POWERUP -> slatecom_set_spi_state(
+#      SLATECOM_SPI_FREE) pide la IRQ "qcom-slate_spi" y su tasklet lee los
+#      registros de estado del MCU por SPI (el camino que abortaba el SMMU) ->
+#      levanta el enlace glink y publica slate_bt_state=ready;
+#   3) el MCU NO se arranca al principio del boot: arrancarlo a los ~23 s
+#      (mientras el contenedor levanta sus HALs) acababa en ese mismo Oops.
+#      Arrancado con el sistema ya arriba (unidad Ordered after graphical.target
+#      + margen) es estable y es cuando el HAL lo aprovecha.
 #
-# Sin todo esto el MCU se quedaba OFFLINE y el enlace glink "channel connection
-# time out" -> ni rueda ni BT. Cargar los .ko del slate a mano y arrancar el MCU
-# un dia cualquiera no basta: los notifiers nunca se disparan.
+# CORONA (pendiente, NO en este servicio): el RSB (slate_rsb/slatersb_rpmsg +
+# el `enable` de /sys/.../slate-rsb/enable) se probo en vivo y TUMBA el SoC
+# (reset a fastboot) incluso con el MCU ya arrancado y pss en marcha, asi que
+# queda fuera hasta arreglarlo aparte (ver AGENTS.md).
 set -u
 
 log() { echo "dace-slate-mcu: $*"; }
-
-# 1) Drivers del RSB: no se autocargan por udev (el resto de la pila slate si).
-modprobe slate_rsb       2>/dev/null && log "slate_rsb cargado"
-modprobe slatersb_rpmsg  2>/dev/null && log "slatersb_rpmsg cargado"
 
 # 2) powerstateservice (vendor.qti.hardware.powerstateservice@1.0).
 #    Es el PEER de estado del MCU slate (TWM/deep-sleep): el fichero power_state
@@ -73,13 +69,10 @@ case "$(cat /sys/class/remoteproc/remoteproc2/state 2>/dev/null)" in
         log "el MCU ya estaba arrancado"
         ;;
     *)
-        # 4) Corona: pedir el enable (queda pendiente hasta el CONFIGR_RSB)
-        if [ -w /sys/devices/platform/soc/soc:qcom,slate-rsb/enable ]; then
-            echo 1 > /sys/devices/platform/soc/soc:qcom,slate-rsb/enable 2>/dev/null \
-                && log "RSB enable=1" \
-                || log "RSB enable: pedido encolado (ENOMEDIUM = aun sin CONFIGR_RSB, normal)"
-        fi
-        # 5) Arrancar el MCU -> notificacion SSR -> SPI FREE + CONFIGR_RSB + glink
+        # CORONA (pendiente): aqui iba el enable del RSB
+        #   echo 1 > /sys/devices/platform/soc/soc:qcom,slate-rsb/enable
+        # Va desactivado: el RSB tumba el SoC. Ver la cabecera.
+        # 5) Arrancar el MCU -> notificacion SSR -> SPI FREE + glink -> BT listo
         log "arrancando el MCU (remoteproc2)..."
         if echo start > /sys/class/remoteproc/remoteproc2/state 2>/dev/null; then
             log "MCU state=$(cat /sys/class/remoteproc/remoteproc2/state 2>/dev/null)"
