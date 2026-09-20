@@ -114,6 +114,23 @@ setup_usb_console() {
     info "console: UDC=${UDC:-none}"
 }
 
+# dace (20-09-2026): con `dace-iommu-defer.patch` el USB tambien espera al
+# apps-smmu (su nodo dwc3@4e00000 lleva iommus=<&apps_smmu 0x120>), y el SMMU
+# no registra hasta que qnoc-monaco carga en la etapa DISPLAY -- DESPUES de
+# este setup_usb_console. Resultado sin esta espera: el gadget se crea pero no
+# hay UDC que enganchar -> ni consola ni adb (parecia un cuelgue).
+# wait_udc: espera ACOTADA (20 s) a que aparezca /sys/class/udc.
+wait_udc() {
+    _w=0
+    while [ $_w -lt 20 ]; do
+        _u=$(ls /sys/class/udc 2>/dev/null | sed -n 1p)
+        [ -n "$_u" ] && { info "UDC disponible: $_u (tras ${_w}s)"; return 0; }
+        _w=$((_w+1)); sleep 1
+    done
+    info "UDC AUSENTE tras 20s (el USB sigue diferido)"
+    return 1
+}
+
 # ── modprobe vendor ──
 KREL=$(uname -r)
 [ ! -e "/lib/modules/$KREL" ] && ln -sf . "/lib/modules/$KREL"
@@ -171,6 +188,10 @@ sleep 2
 dtrace "DISPLAY: consola arriba, cargando qnoc-monaco (color gris oscuro)" 32 32 32
 modprobe qnoc-monaco 2>/dev/kmsg ; _rc=$?
 dtrace "DISPLAY: qnoc-monaco rc=$_rc (color marron)" 160 82 45
+# Reintento de la consola: el apps-smmu ya deberia estar registrado, asi que la
+# cadena USB (diferida hasta ahora) puede bindear y aparecer la UDC. Sin esto
+# el gadget de la consola se quedaba SIN enganchar (creado, UDC vacia).
+wait_udc && setup_usb_console
 # msm_geni_serial DESPUES del qnoc: su geni_icc_get("qup-config") debe ver los
 # nodos del qnoc ya registrados. Si no, of_icc_get devuelve -EINVAL (provider
 # arriba pero nodo aun no) y el probe del UART FALLA sin reintento -> no aparece
