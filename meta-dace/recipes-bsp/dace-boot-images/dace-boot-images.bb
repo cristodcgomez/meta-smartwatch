@@ -347,19 +347,17 @@ do_compile() {
     # se probo en el bootconfig del vendor_boot y NO llega a /proc/cmdline.
     # blob de 2 DTBs. Sin el monacop el ABL cae a EDL.
     #
-    # deferred_probe_timeout=30: IMPRESCINDIBLE para el IOMMU de los devices del
-    # QUP (ver el bloque "QUP/GPI: dominio IOMMU" de init.sh). El kernel, cuando
-    # un driver built-in consume un IOMMU que aun no esta registrado DESPUES de
-    # los initcalls, llama a driver_deferred_probe_check_state(): con el timeout
-    # a 0 (defecto) eso devuelve -ETIMEDOUT -> of_iommu_configure() lo interpreta
-    # como "sin IOMMU" y el device se queda SIN dominio. Es el caso del wrapper
-    # QUP (qcom,qupv3_0_geni_se@4ac0000, CONFIG_QCOM_GENI_SE=y -> driver
-    # built-in): con las dma_ops vacias dma_map_single() devolvia la direccion
-    # FISICA (la usan geni_se_tx/rx_dma_prep y spi_map_buf via ctlr->dev.parent)
-    # mientras el SMMU seguia traduciendo ese stream -> el motor GPI/GSI del SPI
-    # del slate daba "Unhandled interrupt status:0x40" y el SoC resetaba. Con el
-    # timeout >0 el kernel devuelve -EPROBE_DEFER y el wrapper espera al
-    # apps-smmu (que necesita qnoc-monaco, cargado desde el initramfs).
+    # arm_smmu.disable_bypass=0: el SMMU lo deja programado el firmware/bootloader
+    # del T5 y los streams SIN SMR deben PASAR (bypass). El kernel STOCK de Mobvoi
+    # no lleva driver IOMMU en Linux (# CONFIG_ARM_SMMU is not set) pero el nuestro
+    # (google-eos) si, y con CONFIG_ARM_SMMU_DISABLE_BYPASS_BY_DEFAULT=y escribe
+    # sCR0.USFCFG=1 -> LOS STREAMS NO MAPEADOS RECIBEN ABORT. Los devices del QUP
+    # van con direccion FISICA (no tienen dominio IOMMU), asi que recibian abort:
+    # eso es el RX_SBE del HS UART (Slave Bus Error), el "general error" del
+    # GSI/GPI del slate y los cuelgues de bus. El propio kernel lo recomienda en
+    # arm_smmu_global_fault(): 'boot with "arm-smmu.disable_bypass=0" to allow'.
+    # El parametro efectivo se pasa en init.sh (`modprobe arm_smmu
+    # disable_bypass=0`); aqui va tambien por si el kernel lo aplica al modulo.
     "${MKBOOTIMG}" \
         --header_version 4 --pagesize ${MKBOOTIMG_PAGESIZE} \
         --vendor_boot ${WORKDIR}/vendor_kernel_boot.img \
@@ -371,7 +369,7 @@ do_compile() {
         --ramdisk_offset ${MKBOOTIMG_RAMDISK_OFFSET} \
         --tags_offset ${MKBOOTIMG_TAGS_OFFSET} \
         --dtb_offset ${MKBOOTIMG_DTB_OFFSET} \
-        --vendor_cmdline 'lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=noforce kpti=off cgroup.memory=nokmem,nosocket loop.max_part=7 bootconfig qcom_geni_serial.con_enabled=0 androidboot.hardware=dace bootconfig buildvariant=user fw_devlink=permissive deferred_probe_timeout=30 dace.debug=1'
+        --vendor_cmdline 'lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=noforce kpti=off cgroup.memory=nokmem,nosocket loop.max_part=7 bootconfig qcom_geni_serial.con_enabled=0 androidboot.hardware=dace bootconfig buildvariant=user fw_devlink=permissive arm_smmu.disable_bypass=0 dace.debug=1'
 
     # ─── Step 6: mkbootimg boot.img (v4): our kernel + empty ramdisk ───
     if [ ! -f "${LINUX_DACE_KIMG}" ]; then

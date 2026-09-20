@@ -139,8 +139,24 @@ while read mod; do
     # ("Unhandled interrupt status:0x40", spi_gsi_ch_cb status 2) y el SoC
     # resetea. Medido en vivo: 4ac0000/4a90000/4a00000/4a94000 SIN iommu_group.
     case "$name" in
-        qnoc-monaco|msm_drm|msm_kgsl|msm_geni_serial|msm_gpi|i2c-msm-geni|spi-msm-geni)
+        qnoc-monaco|msm_drm|msm_kgsl|msm_geni_serial)
             info "M-- ${name} (diferido al arranque del display)"
+            continue ;;
+        # dace/STOCK: el apps-smmu lo programa el firmware/bootloader y los
+        # streams SIN SMR deben PASAR (bypass). El kernel STOCK de Mobvoi no
+        # lleva driver IOMMU en Linux (# CONFIG_ARM_SMMU is not set), pero el
+        # nuestro (google-eos) SI, y su sCR0 se escribe con USFCFG
+        # (CONFIG_ARM_SMMU_DISABLE_BYPASS_BY_DEFAULT=y) -> todo stream no
+        # mapeado recibe ABORT. Y los devices del QUP van con direccion FISICA
+        # (no tienen dominio): de ahi el RX_SBE del UART (Slave Bus Error = el
+        # abort del SMMU), el "general error" del GSI/GPI del slate y los
+        # cuelgues. El propio kernel lo dice en arm_smmu_global_fault():
+        #   'boot with "arm-smmu.disable_bypass=0" to allow'.
+        arm_smmu)
+            MI=$((MI+1))
+            ptext "CAN M${MI} ${name} disable_bypass=0"
+            info "M${MI} ${name} disable_bypass=0 (bypass como el firmware/stock)"
+            modprobe arm_smmu disable_bypass=0 2>/dev/kmsg
             continue ;;
     esac
     MI=$((MI+1))
@@ -171,46 +187,30 @@ sleep 2
 dtrace "DISPLAY: consola arriba, cargando qnoc-monaco (color gris oscuro)" 32 32 32
 modprobe qnoc-monaco 2>/dev/kmsg ; _rc=$?
 dtrace "DISPLAY: qnoc-monaco rc=$_rc (color marron)" 160 82 45
-# El retry de arm_smmu es ASINCRONO (workqueue de deferred probe) y el wrapper
-# QUP (built-in, deferido desde los initcalls) se reintenta tambien. Esperar a
-# que el apps-smmu este BINDEADO antes de cargar los drivers del QUP: si no,
-# probearian igualmente sin dominio IOMMU (el bug original).
-_i=0
-while [ $_i -lt 25 ] && [ ! -e /sys/bus/platform/drivers/arm-smmu/c600000.apps-smmu ]; do
-    _i=$((_i+1)); sleep 1
-done
-dtrace "IOMMU: apps-smmu bindeado tras ${_i}s [$(ls /sys/class/iommu/ 2>/dev/null | tr '\n' ' ')] (color indigo)" 75 0 130
-# ── QUP/GPI: dominio IOMMU del apps-smmu (fix del reset del SPI del slate) ──
-# qnoc-monaco registra el proveedor ICC y DESBLOQUEA el probe del apps-smmu
-# (arm_smmu.ko, que esta diferido hasta este momento). A partir de aqui los
-# devices con "iommus" del QUP ya pueden obtener su iommu_group + dominio
-# fastmap en su propio probe. El GPI primero (es el motor DMA que usan los
-# SE en modo GSI: los drivers geni piden sus canales con dma_request_chan).
-modprobe msm_gpi 2>/dev/kmsg      ; _rc=$?
-dtrace "DISPLAY: msm_gpi rc=$_rc (color coral)" 255 127 80
-modprobe i2c-msm-geni 2>/dev/kmsg ; _rc=$?
-dtrace "DISPLAY: i2c-msm-geni rc=$_rc (color orquidea)" 186 85 211
-modprobe spi-msm-geni 2>/dev/kmsg ; _rc=$?
-dtrace "DISPLAY: spi-msm-geni rc=$_rc (color dorado)" 218 165 32
 # msm_geni_serial DESPUES del qnoc: su geni_icc_get("qup-config") debe ver los
 # nodos del qnoc ya registrados. Si no, of_icc_get devuelve -EINVAL (provider
 # arriba pero nodo aun no) y el probe del UART FALLA sin reintento -> no aparece
 # /dev/ttyHS0 (BT).
 modprobe msm_geni_serial 2>/dev/kmsg ; _rc=$?
 dtrace "DISPLAY: msm_geni_serial rc=$_rc (color caqui)" 240 230 140
-# Comprobacion del fix: los cuatro deben tener iommu_group.
+# Informativo: en dace estos devices deben quedar SIN dominio IOMMU (es lo
+# correcto: como el stock, el SMMU del firmware les hace bypass con direcciones
+# fisicas). Que TENGAN grupo/dominio es justo lo que rompia el arranque.
 for _d in 4ac0000.qcom,qupv3_0_geni_se 4a90000.spi 4a00000.qcom,gpi-dma 4a94000.qcom,qup_uart; do
     if [ -e /sys/bus/platform/devices/$_d/iommu_group ]; then
-        info "IOMMU: $_d CON grupo ($(readlink /sys/bus/platform/devices/$_d/iommu_group))"
+        info "IOMMU: $_d CON grupo ($(readlink /sys/bus/platform/devices/$_d/iommu_group)) — NO deberia"
     else
-        info "IOMMU: $_d SIN grupo (el fix de orden no ha funcionado)"
+        info "IOMMU: $_d SIN grupo (correcto: bypass del firmware, como stock)"
     fi
 done
-dtrace "DISPLAY: fin de la carga del QUP (color azul claro) — si el panel se queda AQUI, el cuelgue esta en msm_drm" 176 196 222
+dtrace "DISPLAY: fin de la carga previa al DRM (color azul claro = ULTIMO color visible)" 176 196 222
 modprobe msm_drm 2>/dev/kmsg     ; _rc=$?
-dtrace "DISPLAY: msm_drm rc=$_rc (color verde claro)" 100 200 100
+# OJO: a partir de aqui el SDE/DRM se queda la pantalla y deja de escanear el
+# continuous-splash -> los colores que pintemos ya NO se ven. El ultimo color
+# visible del panel es siempre el de la linea anterior (azul claro).
+dtrace "DISPLAY: msm_drm rc=$_rc (color verde claro; ya no se vera)" 100 200 100
 modprobe msm_kgsl 2>/dev/kmsg    ; _rc=$?
-dtrace "DISPLAY: fin de la carga (color blanco azulado) — si el panel se queda AQUI, no hubo cuelgue" 210 220 255
+dtrace "DISPLAY: msm_kgsl rc=$_rc (color blanco azulado; ya no se vera)" 210 220 255
 info "DISPLAY: fin de la carga (si sigues viendo esto, no hubo reset)"
 sleep 2
 
