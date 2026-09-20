@@ -28,40 +28,37 @@
 # queda fuera hasta arreglarlo aparte (ver AGENTS.md).
 set -u
 
-log() { echo "dace-slate-mcu: $*"; }
+log() { echo "$(date '+%H:%M:%S') dace-slate-mcu: $*" >> /run/dace-slate-mcu.log; }
+
+# NOTA CRITICA (20-09-2026): este servicio NO escribe a journald ni a la consola
+# (StandardOutput=null en el unit). Medido: con journald/logd atascados (pasa en
+# arranques cargados) cualquier escritura a journald BLOQUEA, y el script se
+# quedaba colgado en su primer mensaje -> 'start operation timed out' y el MCU
+# nunca arrancaba. El log va a /run (tmpfs, sin desgaste) y se puede leer luego:
+#   cat /run/dace-slate-mcu.log
+# Por el mismo motivo ya no se usa lxc-attach en la ruta critica (se cuelga
+# cuando lo lanza un unit): pss arranca por la linea 'interface' del .rc y el
+# HAL/bluebinder se relanzan matandolos por /proc.
 
 # 2) powerstateservice (vendor.qti.hardware.powerstateservice@1.0).
-#    Es el PEER de estado del MCU slate (TWM/deep-sleep): el fichero power_state
-#    y /dev/slate_com_dev. Su .rc NO trae linea 'interface' -> igual que
-#    allocator/composer, hay que arrancarlo con ctl.start (dace-lxc-android-start
-#    ademas le añade la linea 'interface' al .rc, asi init tambien lo arranca
-#    solo si algun cliente lo pide).
+#    Es el PEER de estado del MCU slate (TWM/deep-sleep): /dev/power_state y
+#    /dev/slate_com_dev. Lo arranca el init del contenedor GRACIAS a la linea
+#    'interface' que dace-lxc-android-start.sh le añade a su .rc (su .rc original
+#    no la trae y por eso nunca arrancaba: 'Could not find
+#    ...IPowerStateService/default' cada 60 s).
 #    TIENE QUE ESTAR ARRANCADO ANTES DE LEVANTAR EL MCU: sin el, el MCU se queda
-#    sin quien le conteste los cambios de estado y el SoC se RESETEA ~8 s despues
-#    de subir el enlace glink (medido 20-09-2026). El container pide este
-#    servicio a gritos ('Could not find ...IPowerStateService/default').
-#    OJO: todos los lxc-attach van con `timeout`: en 2 de 3 arranques se quedo
-#    colgado indefinidamente y el servicio nunca llegaba a arrancar el MCU.
-#    Y solo 3 intentos (8 s): mas intentos = cada uno consume el timeout del
-#    unit y acababamos en 'start operation timed out' sin arrancar el MCU.
-i=0
-while [ $i -lt 3 ]; do
-    timeout 8 lxc-attach -n android -- /system/bin/getprop 2>/dev/null | grep -q . && break
-    i=$((i + 1))
-    sleep 2
-done
-if timeout 8 lxc-attach -n android -- /system/bin/setprop ctl.start powerstateservice-hal-1-0 2>/dev/null; then
-    log "powerstateservice-hal-1-0 ctl.start enviado"
-else
-    log "AVISO: ctl.start de pss no respondio (el .rc con 'interface' deberia arrancarlo solo)"
-fi
-# Comprobar por sysfs/proc, sin lxc-attach: el fichero /dev/power_state y
-# /dev/slate_com_dev los abre el propio servicio.
-for _i in 1 2 3 4 5; do
+#    sin quien le conteste los cambios de estado y el SoC acaba en Oops.
+#    AQUI NO SE USA lxc-attach (se cuelga desde un unit): solo se comprueba que
+#    el servicio haya abierto /dev/power_state.
+for _i in 1 2 3 4 5 6; do
     [ -c /dev/power_state ] && break
     sleep 2
 done
-log "pss: /dev/power_state $([ -c /dev/power_state ] && echo presente || echo ausente)"
+if [ -c /dev/power_state ]; then
+    log "pss OK (/dev/power_state presente)"
+else
+    log "AVISO: /dev/power_state ausente: pss no arranco (mirar el .rc/overlay)"
+fi
 
 # 3) Esperar a que exista el remoteproc del MCU (qcom_rproc_slate lo crea al
 #    probe; su .ko tambien lo pide udev, pero puede ir con retraso).

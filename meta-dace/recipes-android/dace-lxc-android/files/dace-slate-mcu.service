@@ -19,9 +19,13 @@ RemainAfterExit=yes
 # MCU este antes que el.
 ExecStartPre=/bin/sleep 20
 ExecStart=/usr/libexec/dace-slate-mcu.sh
-StandardOutput=journal+console
-StandardError=journal+console
-TimeoutStartSec=120
+# NO escribir a journald/consola: con journald/logd atascados la escritura
+# BLOQUEA y el script se quedaba colgado en su primer mensaje -> el unit moria
+# por timeout sin arrancar el MCU (medido 20-09-2026). El script loguea en
+# /run/dace-slate-mcu.log (tmpfs).
+StandardOutput=null
+StandardError=null
+TimeoutStartSec=240
 
 [Install]
 WantedBy=multi-user.target
