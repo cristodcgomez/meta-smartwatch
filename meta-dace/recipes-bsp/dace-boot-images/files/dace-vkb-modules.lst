@@ -203,7 +203,17 @@ heap_mem_ext_v01:k
 soc_sleep_stats:k
 subsystem_sleep_stats:k
 sysmon_subsystem_stats:k
-power_state:k
+# power_state va STOCK (:stock, .ko de Mobvoi parcheado con patch-stock-module.py).
+# El driver de google-eos cambio el ABI de cara a userspace:
+#   stock: MODEM_EXIT=5 ADSP_EXIT=6  (sin CDSP)      PREPARE_FOR_HIBERNATION=7
+#   goog : CDSP_SUSPEND=5 MODEM_EXIT=6 ADSP_EXIT=7   PREPARE_FOR_HIBERNATION=9
+# y el peer del MCU slate es el "powerstateservice" (pss) de MOBVOI, que pide los
+# estados con el ABI STOCK: con el nuestro, su MODEM_EXIT(5) cae en CDSP_SUSPEND
+# y la maquina de estados nunca completa -> el MCU se queda sin peer y NO
+# habilita el bloque BT (medido: geni_ios:0x0 en el SE del UART = el chip no
+# maneja sus lineas, y el HAL muere con InitTimeOut). Con el .ko stock el ABI
+# coincide exacto (mismo binario que usa el pss en stock).
+power_state:stock
 
 # ────────────────── ADSP audio chain (boots ADSP via /sys/kernel/boot_adsp/boot) ──────────────────
 # adsp_loader_dlkm creates /sys/kernel/boot_adsp/boot; writing 1 triggers
