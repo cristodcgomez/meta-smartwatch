@@ -136,8 +136,13 @@ else
 fi
 
 # 7) Esperar a que el controlador quede operativo (hci0 con BD address).
+# OJO: el bring-up REAL tarda ~100 s desde aqui: el HAL esta relanzado pero su
+# primer intento con el chip ya alimentado llega en el siguiente ciclo (~60 s) y
+# la descarga del patch+NVM son unos segundos mas (medido 21-09-2026: hci0 sube
+# a los ~90-110 s). El tope anterior (40 x 2 s = 80 s) se quedaba corto y el log
+# escupia un AVISO enganoso aunque todo acabara bien: por eso 150 x 2 s = 300 s.
 i=0
-while [ $i -lt 40 ]; do
+while [ $i -lt 150 ]; do
     if hciconfig 2>/dev/null | grep -qE "BD Address: ([0-9A-Fa-f]{2}:){5}" && \
        ! hciconfig 2>/dev/null | grep -q "BD Address: 00:00:00:00:00:00"; then
         log "hci0 LISTO: $(hciconfig 2>/dev/null | sed -n 2p | tr -s " ")"
@@ -146,5 +151,5 @@ while [ $i -lt 40 ]; do
     i=$((i + 1))
     sleep 2
 done
-[ $i -ge 40 ] && log "AVISO: hci0 no subio en ~80 s (mirar logcat del contenedor)"
+[ $i -ge 150 ] && log "AVISO: hci0 no subio en ~300 s (mirar logcat del contenedor)"
 exit 0
