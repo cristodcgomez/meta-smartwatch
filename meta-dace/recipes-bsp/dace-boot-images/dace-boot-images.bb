@@ -352,6 +352,19 @@ do_compile() {
     # y NO el rootfs. Para un arranque "de produccion" (que el reloj levante el
     # rootfs solo) hay que QUITARLO de aqui. Tiene que ir en el vendor_cmdline:
     # se probo en el bootconfig del vendor_boot y NO llega a /proc/cmdline.
+    # msm_geni_serial.dace_hs_uart_fifo=0 (21-09-2026): DESACTIVA el workaround
+    # FIFO del HS UART. Ese workaround (dace-hs-uart-fifo.patch) era para que el
+    # SE-DMA no se llevara un RX_SBE y reseteara el SoC, porque el wrapper QUP
+    # (4ac0000) se quedaba SIN dominio IOMMU. Eso ya lo arregla
+    # dace-iommu-defer.patch (el wrapper/GPI ya tienen iommu_group y su DMA
+    # funciona: es lo que hace que el SPI del slate levante el MCU sin reset).
+    # Con FIFO forzado la TX del SE NO FUNCIONA: medido con el loopback interno
+    # del driver (TX_RX y CTSRFR_TXRX) -> 0 bytes, y por eso el HAL moria en
+    # InitTimeOut y el hci_qca del kernel en "command 0xfc00 tx timeout": el chip
+    # no recibia NADA (aunque estaba vivo: el stock lo anunciaba por BLE).
+    # La rama FIFO de port_setup ademas NO hace la config que si hace la DMA
+    # (geni_se_config_packing + SE_GENI_CFG_REG80). El stock usa DMA y funciona.
+    #
     # blob de 2 DTBs. Sin el monacop el ABL cae a EDL.
     #
     # NI deferred_probe_timeout NI arm_smmu.disable_bypass (=0): los dos se
@@ -379,7 +392,7 @@ do_compile() {
         --ramdisk_offset ${MKBOOTIMG_RAMDISK_OFFSET} \
         --tags_offset ${MKBOOTIMG_TAGS_OFFSET} \
         --dtb_offset ${MKBOOTIMG_DTB_OFFSET} \
-        --vendor_cmdline 'lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=noforce kpti=off cgroup.memory=nokmem,nosocket loop.max_part=7 bootconfig qcom_geni_serial.con_enabled=0 androidboot.hardware=dace bootconfig buildvariant=user fw_devlink=permissive dace.debug=1'
+        --vendor_cmdline 'lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=noforce kpti=off cgroup.memory=nokmem,nosocket loop.max_part=7 bootconfig qcom_geni_serial.con_enabled=0 androidboot.hardware=dace bootconfig buildvariant=user fw_devlink=permissive dace.debug=1 msm_geni_serial.dace_hs_uart_fifo=0'
 
     # ─── Step 6: mkbootimg boot.img (v4): our kernel + empty ramdisk ───
     if [ ! -f "${LINUX_DACE_KIMG}" ]; then
