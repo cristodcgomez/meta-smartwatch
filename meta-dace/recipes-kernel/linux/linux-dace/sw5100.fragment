@@ -172,3 +172,19 @@ CONFIG_TOUCHSCREEN_RM_TS=m
 # files/README.txt y patch-stock-module.py). Se deja la linea por si algun dia
 # se puede activar: entonces habria que bakear los .ko SIN parchear.
 CONFIG_SHADOW_CALL_STACK=y
+
+# ── GESTIÓN DE ENERGÍA: autosleep para MCE (23-09-2026) ──────────────────────
+# MEDIDO: el reloj NO suspende nunca (`/sys/power/suspend_stats/success` = 0 tras
+# 21 h de uptime). Causa raíz: MCE (mce/libwakelock.c:lwl_probe()) busca un
+# modelo de suspend soportado y no encuentra ninguno:
+#   * `echo on > /sys/power/state` -> EINVAL (early-suspend no existe en 5.15)
+#   * /sys/power/autosleep NO existe (CONFIG_PM_AUTOSLEEP off, igual que el
+#     stock de Mobvoi y que aurora) -> lwl_probe() devuelve SUSPEND_TYPE_NONE
+#   * resultado: mdy_stm_start_fb_suspend() no escribe NADA y el SoC se queda
+#     en WFI/C3 para siempre (mce_mux se re-activa ~1/1.9 s, 40 617 veces).
+# En stock Android el suspend lo dispara el framework (PowerManager escribe
+# "mem" en /sys/power/state); en AsteroidOS no hay framework -> el mecanismo
+# nativo es el autosleep de MCE/Sailfish (writes "mem" en autosleep al apagar
+# el framebuffer). Con PM_AUTOSLEEP=y, lwl_probe() devuelve SUSPEND_TYPE_AUTO y
+# MCE vuelve a suspender. Es el ÚNICO cambio de kernel que pide la energía.
+CONFIG_PM_AUTOSLEEP=y
