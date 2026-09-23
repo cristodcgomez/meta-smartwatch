@@ -4,15 +4,16 @@ Subject: [PATCH] dace: launcher consume la corona (rueda REL_WHEEL + pulsador KE
 La rueda de la corona (slate-spi, event2) llega como QWheelEvent via el plugin
 generico evdevmouse de Qt, pero el estilo por defecto del launcher
 (000-default-horizontal.qml) no tenia WheelHandler -> la lista de apps no se
-movia. El pulsador de la corona emite KEY_MENU (139) en event0 (gpio-keys); el
-keymap de AsteroidOS lo mapea a Qt::Key_MenuKB, pero la escena home NO recibe
-foco de teclado (Keys.onPressed nunca se disparaba), asi que se captura con un
-filtro de eventos GLOBAL (CrownButtonHandler, mismo patron que lipstick's
-VolumeControl). La corona es ademas un encoder continuo de alta resolucion, asi
-que la rueda se amortigua (acumulando deltas) tanto en la home como en el
-reenvio a las apps (LipstickCompositorWindow::wheelEvent). Todo esto es
-especifico del hardware de esta variante (dace / TicWatch Pro 5 con el MCU
-slate), no upstreamable.
+movia. Ademas ese ListView ata `contentX: tutorialScroll` (binding a 0), asi que
+hay que asignar contentX directamente. El pulsador de la corona emite KEY_MENU
+(139) en event0 (gpio-keys); el keymap de AsteroidOS lo mapea a Qt::Key_MenuKB,
+pero la escena home NO recibe foco de teclado (Keys.onPressed nunca se
+disparaba), asi que se captura con un filtro de eventos GLOBAL
+(CrownButtonHandler, mismo patron que lipstick's VolumeControl). La corona es
+ademas un encoder continuo de alta resolucion, asi que la rueda se amortigua
+(acumulando deltas) tanto en la home como en el reenvio a las apps
+(LipstickCompositorWindow::wheelEvent). Todo esto es especifico del hardware de
+esta variante (dace / TicWatch Pro 5 con el MCU slate), no upstreamable.
 
 Upstream-Status: Inappropriate [dace bring-up]
 
@@ -70,10 +71,10 @@ index 87f77f1..fd4956b 100644
  add_executable(asteroid-launcher ${SRC} ${HEADERS} resources-qml.qrc)
  
 diff --git a/src/applauncher/000-default-horizontal.qml b/src/applauncher/000-default-horizontal.qml
-index cdcd723..683d8d9 100644
+index cdcd723..c4da376 100644
 --- a/src/applauncher/000-default-horizontal.qml
 +++ b/src/applauncher/000-default-horizontal.qml
-@@ -42,6 +42,38 @@ Item {
+@@ -42,6 +42,45 @@ Item {
      property bool fakePressed: false
  
      anchors.fill: parent
@@ -84,16 +85,20 @@ index cdcd723..683d8d9 100644
 +     * (angleDelta = 120 por notch). Si el sentido sale invertido, cambiar el
 +     * signo de `steps`. */
 +    function launchSelected() {
-+        var it = launcherModel.get(appsListView.currentPos)
++        var idx = Math.round(appsListView.contentX / appsListView.width)
++        idx = Math.max(0, Math.min(appsListView.count - 1, idx))
++        console.log("dace crown: launchSelected idx=" + idx + " count=" + appsListView.count)
++        var it = launcherModel.get(idx)
 +        if (it && it.object)
 +            it.object.launchApplication()
++        else
++            console.log("dace crown: launchSelected sin objeto")
 +    }
 +
 +    WheelHandler {
 +        id: crownWheel
 +        property real daceAccum: 0
-+        // dace/CORONA: encoder continuo -> hacen falta daceDiv eventos por item.
-+        // Subir daceDiv = menos sensible.
++        // dace/CORONA: encoder continuo -> daceDiv eventos por item.
 +        readonly property int daceDiv: 3
 +        onWheel: (event) => {
 +            daceAccum += event.angleDelta.y / 120.0
@@ -101,9 +106,12 @@ index cdcd723..683d8d9 100644
 +            while (daceAccum >= daceDiv)  { daceAccum -= daceDiv; steps += 1 }
 +            while (daceAccum <= -daceDiv) { daceAccum += daceDiv; steps -= 1 }
 +            if (steps !== 0) {
-+                var n = Math.max(0, Math.min(appsListView.count - 1,
-+                                             appsListView.currentPos + steps))
-+                appsListView.positionViewAtIndex(n, ListView.Center)
++                // OJO: este ListView tiene `contentX: tutorialScroll` (binding a 0),
++                // asi que positionViewAtIndex no movia nada. Se asigna contentX
++                // directamente (la asignacion desde JS rompe el binding).
++                var cur = Math.round(appsListView.contentX / appsListView.width)
++                var n = Math.max(0, Math.min(appsListView.count - 1, cur + steps))
++                appsListView.contentX = n * appsListView.width
 +            }
 +            event.accepted = true
 +        }
@@ -255,10 +263,10 @@ index c676c4d..bb98577 100644
      // Fixes a bug where some applications wouldn't launch, eg. terminal or browser
      setenv("EGL_PLATFORM", "wayland", 1);
 diff --git a/src/qml/MainScreen.qml b/src/qml/MainScreen.qml
-index 3d78ce9..80d864b 100644
+index 3d78ce9..e3f4da1 100644
 --- a/src/qml/MainScreen.qml
 +++ b/src/qml/MainScreen.qml
-@@ -48,6 +48,25 @@ Item {
+@@ -48,6 +48,28 @@ Item {
      visible: Lipstick.compositor.homeActive || aboutToOpen || aboutToClose || aboutToMinimize
      enabled: visible
  
@@ -271,6 +279,9 @@ index 3d78ce9..80d864b 100644
 +    function crownPressed() {
 +        if (!visible)
 +            return
++        console.log("dace crown: crownPressed vpos=" + grid.currentVerticalPos
++                    + " appLauncher=" + (Desktop.appLauncher ? "si" : "no")
++                    + " launchSelected=" + (Desktop.appLauncher && Desktop.appLauncher.launchSelected ? "si" : "no"))
 +        if (grid.currentVerticalPos === 1) {
 +            if (Desktop.appLauncher && Desktop.appLauncher.launchSelected)
 +                Desktop.appLauncher.launchSelected()
