@@ -4,9 +4,10 @@ Subject: [PATCH] dace: launcher consume la corona (rueda REL_WHEEL + pulsador KE
 La rueda de la corona (slate-spi, event2) llega como QWheelEvent a traves del
 plugin generico evdevmouse de Qt, pero el estilo por defecto del launcher
 (000-default-horizontal.qml) no tiene WheelHandler -> la lista de apps no se
-movia. El pulsador de la corona emite KEY_MENU (139) en event0 (gpio-keys) y
-tampoco se consumia. Ambos son especificos del hardware de esta variante
-(dace / TicWatch Pro 5 con el MCU slate), no upstreamables.
+movia. El pulsador de la corona emite KEY_MENU (139) en event0 (gpio-keys); el
+keymap de AsteroidOS lo mapea a Qt::Key_MenuKB, que tampoco se consumia. Ambos
+son especificos del hardware de esta variante (dace / TicWatch Pro 5 con el MCU
+slate), no upstreamables.
 
 Upstream-Status: Inappropriate [dace bring-up]
 
@@ -77,10 +78,10 @@ index 8652837..2abfcba 100644
          }
  
 diff --git a/src/qml/MainScreen.qml b/src/qml/MainScreen.qml
-index 3d78ce9..49aa743 100644
+index 3d78ce9..ff88469 100644
 --- a/src/qml/MainScreen.qml
 +++ b/src/qml/MainScreen.qml
-@@ -48,6 +48,25 @@ Item {
+@@ -48,6 +48,28 @@ Item {
      visible: Lipstick.compositor.homeActive || aboutToOpen || aboutToClose || aboutToMinimize
      enabled: visible
  
@@ -90,7 +91,10 @@ index 3d78ce9..49aa743 100644
 +     * si no, abre la lista. Requiere foco de teclado en la escena home. */
 +    focus: visible
 +    Keys.onPressed: (event) => {
-+        if (event.key === Qt.Key_Menu) {
++        // El keymap de AsteroidOS (keys.kmap -> kmap2qmap) mapea KEY_MENU (139)
++        // a Qt::Key_MenuKB (parche 0001-kmap2qmap-Map-MenuKB-key). Key_Menu no
++        // existe en ese mapa, por eso se aceptan ambos por si se cambia.
++        if (event.key === Qt.Key_MenuKB || event.key === Qt.Key_Menu) {
 +            event.accepted = true
 +            if (grid.currentVerticalPos === 1) {
 +                if (Desktop.appLauncher && Desktop.appLauncher.launchSelected)
