@@ -22,13 +22,28 @@
 #      Arrancado con el sistema ya arriba (unidad Ordered after graphical.target
 #      + margen) es estable y es cuando el HAL lo aprovecha.
 #
-# CORONA (pendiente, NO en este servicio): el RSB (slate_rsb/slatersb_rpmsg +
-# el `enable` de /sys/.../slate-rsb/enable) se probo en vivo y TUMBA el SoC
-# (reset a fastboot) incluso con el MCU ya arrancado y pss en marcha, asi que
-# queda fuera hasta arreglarlo aparte (ver AGENTS.md).
+# CORONA/RSB (22-09-2026): los modulos slate_rsb + slatersb_rpmsg se cargan
+# AQUI, antes del `echo start`. Corto: el canal slate-rsb-ctl no existe hasta
+# que el MCU arranca; si slatersb_rpmsg probea con slate_rsb ausente
+# (rsb_ops=NULL) es una llamada a NULL -> oops -> panic (panic_on_oops=1) ->
+# reset (el crash documentado en AGENTS §6). Con el MCU parado el orden es el
+# unico seguro, y es el mismo que el stock (carga ambos en
+# vendor_dlkm/modules.load antes de arrancar el MCU).
+#
+# v2 (22-09-2026): NO se pre-habilita el RSB. Con pending_enable=1 el driver,
+# al completar el CONFIGR_RSB del AFTER_POWERUP, manda el SLATERSB_ENABLE al
+# MCU de inmediato -> candidato nº1 del reset a los pocos segundos de arrancar
+# el MCU (AGENTS §6). El ENABLE se hace AL FINAL, con BT ya confirmado.
 set -u
 
-log() { echo "$(date '+%H:%M:%S') dace-slate-mcu: $*" >> /run/dace-slate-mcu.log; }
+# El log va a /run (tmpfs, lectura en vivo) Y a /var/log (eMMC: sobrevive a un
+# reset duro, que es justo lo que hay que depurar). sync por linea: son ~40.
+log() {
+    _l="$(date '+%H:%M:%S') dace-slate-mcu: $*"
+    echo "$_l" >> /run/dace-slate-mcu.log
+    echo "$_l" >> /var/log/dace-slate-mcu.log 2>/dev/null
+    sync 2>/dev/null
+}
 
 # NOTA CRITICA (20-09-2026): este servicio NO escribe a journald ni a la consola
 # (StandardOutput=null en el unit). Medido: con journald/logd atascados (pasa en
@@ -72,14 +87,41 @@ if [ ! -e /sys/class/remoteproc/remoteproc2/state ]; then
     log "AVISO: no existe /sys/class/remoteproc/remoteproc2/state (pila slate no cargada)"
     exit 0
 fi
+RSB=/sys/devices/platform/soc/soc:qcom,slate-rsb/enable
+
+# (corona) Cargar la pila RSB ahora — SIEMPRE con el MCU parado (el `echo
+# start` esta mas abajo): slatersb_rpmsg probeando con slate_rsb ausente
+# (rsb_ops.glink_channel_state=NULL) es una llamada a NULL -> oops -> reset.
+# Fallback por si dace-modules-load fallo o esta mascarado (boot noautoload);
+# en el arranque normal ya vienen de ahi y esto no hace nada.
+if ! grep -q '^slate_rsb ' /proc/modules; then
+    timeout 8 modprobe slatersb_rpmsg slate_rsb >> /run/dace-slate-mcu.log 2>&1
+fi
+if grep -q '^slate_rsb ' /proc/modules; then
+    log "corona: slate_rsb+slatersb_rpmsg cargados (enable=$(if [ -e "$RSB" ]; then echo si; else echo no; fi))"
+else
+    # Sin slate_rsb, abrir el canal crashearia: descargo slatersb (nunca ha
+    # probeado, el canal aun no existe) y la blacklist impide que udev lo
+    # recargue solo -> corona inerte, pero BT arranca y el reloj NO resetea.
+    log "AVISO: corona: slate_rsb NO cargo; descargo slatersb_rpmsg si esta suelto"
+    rmmod slatersb_rpmsg >> /run/dace-slate-mcu.log 2>&1
+fi
+
+# (corona/seguridad) qcom_rproc_slate hardcodea recovery_disabled=true y
+# slate_restart_work hace BUG_ON(recovery_disabled): un crash del MCU = BUG =
+# panic del kernel = reset. Con 'enabled' (mismo truco que el DOG del modem en
+# dace-vendor-mount) ese crash va al recovery del rproc. No-op si no esta crashed.
+if echo enabled > /sys/class/remoteproc/remoteproc2/recovery 2>/dev/null; then
+    log "corona/seguridad: remoteproc2 recovery=enabled"
+fi
+
 case "$(cat /sys/class/remoteproc/remoteproc2/state 2>/dev/null)" in
     running)
         log "el MCU ya estaba arrancado"
         ;;
     *)
-        # CORONA (pendiente): aqui iba el enable del RSB
-        #   echo 1 > /sys/devices/platform/soc/soc:qcom,slate-rsb/enable
-        # Va desactivado: el RSB tumba el SoC. Ver la cabecera.
+        # CORONA v2: NO pre-habilitar el RSB aqui (ver cabecera). El enable va
+        # al final, con el BT ya arriba.
         # 5) Arrancar el MCU -> notificacion SSR -> SPI FREE + glink -> BT listo
         log "arrancando el MCU (remoteproc2)..."
         if echo start > /sys/class/remoteproc/remoteproc2/state 2>/dev/null; then
@@ -152,4 +194,25 @@ while [ $i -lt 150 ]; do
     sleep 2
 done
 [ $i -ge 150 ] && log "AVISO: hci0 no subio en ~300 s (mirar logcat del contenedor)"
+
+# 8) CORONA v2: habilitar el RSB AL FINAL. El CONFIGR_RSB ya lo mando el driver
+#    al arrancar el MCU (slatersb_slateup_work en el AFTER_POWERUP); aqui, con
+#    is_cnfgrd, el store_enable encola slatersb_enable_rsb -> SLATERSB_ENABLE
+#    al MCU. Se hace despues del BT para no ponerlo en riesgo: si esto resetea,
+#    el log persistente (/var/log/dace-slate-mcu.log) dira 'hci0 LISTO' antes,
+#    o sea el culpable es el ENABLE (no el CONFIGR ni el arranque del MCU).
+n=0
+while [ -e "$RSB" ] && [ "$n" -lt 5 ]; do
+    if echo 1 > "$RSB" 2>/dev/null; then
+        log "corona: RSB habilitado (enable=1 ok, intento $n)"
+        break
+    fi
+    log "corona: enable=1 -> ENOMEDIUM (intento $n; aun sin CONFIGR_RSB)"
+    n=$((n + 1))
+    sleep 2
+done
+if [ -e "$RSB" ] && [ "$n" -ge 5 ]; then
+    log "AVISO: corona: enable no aceptado x5 (buscar 'slatersb' en dmesg)"
+fi
+dmesg 2>/dev/null | grep -iE 'slatersb|slate_rsb' | tail -n 10 >> /var/log/dace-slate-mcu.log 2>/dev/null
 exit 0

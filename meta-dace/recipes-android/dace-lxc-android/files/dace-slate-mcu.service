@@ -25,7 +25,7 @@ ExecStart=/usr/libexec/dace-slate-mcu.sh
 # /run/dace-slate-mcu.log (tmpfs).
 StandardOutput=null
 StandardError=null
-TimeoutStartSec=240
+TimeoutStartSec=420
 
 [Install]
 WantedBy=multi-user.target
