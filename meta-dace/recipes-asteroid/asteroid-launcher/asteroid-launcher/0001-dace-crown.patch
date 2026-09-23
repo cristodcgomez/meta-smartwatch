@@ -1,22 +1,79 @@
 From: dace bring-up <dace@localhost>
 Subject: [PATCH] dace: launcher consume la corona (rueda REL_WHEEL + pulsador KEY_MENU)
 
-La rueda de la corona (slate-spi, event2) llega como QWheelEvent a traves del
-plugin generico evdevmouse de Qt, pero el estilo por defecto del launcher
-(000-default-horizontal.qml) no tiene WheelHandler -> la lista de apps no se
+La rueda de la corona (slate-spi, event2) llega como QWheelEvent via el plugin
+generico evdevmouse de Qt, pero el estilo por defecto del launcher
+(000-default-horizontal.qml) no tenia WheelHandler -> la lista de apps no se
 movia. El pulsador de la corona emite KEY_MENU (139) en event0 (gpio-keys); el
-keymap de AsteroidOS lo mapea a Qt::Key_MenuKB, que tampoco se consumia. Ambos
-son especificos del hardware de esta variante (dace / TicWatch Pro 5 con el MCU
-slate), no upstreamables.
+keymap de AsteroidOS lo mapea a Qt::Key_MenuKB, pero la escena home NO recibe
+foco de teclado (Keys.onPressed nunca se disparaba), asi que se captura con un
+filtro de eventos GLOBAL (CrownButtonHandler, mismo patron que lipstick's
+VolumeControl). La corona es ademas un encoder continuo de alta resolucion, asi
+que la rueda se amortigua (acumulando deltas) tanto en la home como en el
+reenvio a las apps (LipstickCompositorWindow::wheelEvent). Todo esto es
+especifico del hardware de esta variante (dace / TicWatch Pro 5 con el MCU
+slate), no upstreamable.
 
 Upstream-Status: Inappropriate [dace bring-up]
 
 ---
+diff --git a/lipstick/src/compositor/lipstickcompositorwindow.cpp b/lipstick/src/compositor/lipstickcompositorwindow.cpp
+index 7579afb..eb00ed2 100644
+--- a/lipstick/src/compositor/lipstickcompositorwindow.cpp
++++ b/lipstick/src/compositor/lipstickcompositorwindow.cpp
+@@ -262,7 +262,23 @@ void LipstickCompositorWindow::wheelEvent(QWheelEvent *event)
+             inputDevice->sendMouseMoveEvent(v, pos, pos);
+         }
+         QPoint angle = event->angleDelta();
+-        inputDevice->sendMouseWheelEvent(Qt::Vertical, angle.y());
++        // dace/CORONA (22-09-2026): la corona del slate es un encoder CONTINUO
++        // de alta resolucion: cada evento REL_WHEEL vale 1 y Qt lo entrega como
++        // angleDelta.y = 120 (un "notch"). Un giro minimo genera muchisimos
++        // eventos, asi que se acumula y se manda 1 notch por cada daceDiv. Subir
++        // daceDiv = menos sensible. (Es el camino de las APPS; la home lo
++        // amortigua en sus WheelHandler de QML.)
++        static int daceWheelAccum = 0;
++        const int daceDiv = 3;
++        daceWheelAccum += angle.y();
++        while (daceWheelAccum >= 120 * daceDiv) {
++            daceWheelAccum -= 120 * daceDiv;
++            inputDevice->sendMouseWheelEvent(Qt::Vertical, 120);
++        }
++        while (daceWheelAccum <= -120 * daceDiv) {
++            daceWheelAccum += 120 * daceDiv;
++            inputDevice->sendMouseWheelEvent(Qt::Vertical, -120);
++        }
+     } else {
+         event->ignore();
+     }
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 87f77f1..fd4956b 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -5,14 +5,16 @@ set(SRC
+ 	gesturefilterarea.cpp
+ 	applauncher.cpp
+ 	notificationsnoozer.cpp
+-	watchfacereloader.cpp)
++	watchfacereloader.cpp
++	crownbuttonhandler.cpp)
+ set(HEADERS
+ 	applauncherbackground.h
+ 	firstrun.h
+ 	gesturefilterarea.h
+ 	applauncher.h
+ 	notificationsnoozer.h
+-	watchfacereloader.h)
++	watchfacereloader.h
++	crownbuttonhandler.h)
+ 
+ add_executable(asteroid-launcher ${SRC} ${HEADERS} resources-qml.qrc)
+ 
 diff --git a/src/applauncher/000-default-horizontal.qml b/src/applauncher/000-default-horizontal.qml
-index cdcd723..46d9cd6 100644
+index cdcd723..683d8d9 100644
 --- a/src/applauncher/000-default-horizontal.qml
 +++ b/src/applauncher/000-default-horizontal.qml
-@@ -42,6 +42,31 @@ Item {
+@@ -42,6 +42,38 @@ Item {
      property bool fakePressed: false
  
      anchors.fill: parent
@@ -34,8 +91,15 @@ index cdcd723..46d9cd6 100644
 +
 +    WheelHandler {
 +        id: crownWheel
++        property real daceAccum: 0
++        // dace/CORONA: encoder continuo -> hacen falta daceDiv eventos por item.
++        // Subir daceDiv = menos sensible.
++        readonly property int daceDiv: 3
 +        onWheel: (event) => {
-+            var steps = Math.round(event.angleDelta.y / 120.0)
++            daceAccum += event.angleDelta.y / 120.0
++            var steps = 0
++            while (daceAccum >= daceDiv)  { daceAccum -= daceDiv; steps += 1 }
++            while (daceAccum <= -daceDiv) { daceAccum += daceDiv; steps -= 1 }
 +            if (steps !== 0) {
 +                var n = Math.max(0, Math.min(appsListView.count - 1,
 +                                             appsListView.currentPos + steps))
@@ -49,7 +113,7 @@ index cdcd723..46d9cd6 100644
          id: appsListView
  
 diff --git a/src/applauncher/005-speed-dial.qml b/src/applauncher/005-speed-dial.qml
-index 8652837..2abfcba 100644
+index 8652837..9679c63 100644
 --- a/src/applauncher/005-speed-dial.qml
 +++ b/src/applauncher/005-speed-dial.qml
 @@ -27,6 +27,12 @@ Item {
@@ -65,48 +129,180 @@ index 8652837..2abfcba 100644
      // Scaling for when the launcher is shown as full screen (1.0) or in the settings app (0.5).
      property var viewScale: (root.width > root.height ? root.height : root.width) / Dims.l(100)
      property alias currentIndex: pv.currentIndex
-@@ -230,7 +236,10 @@ Item {
- 
-         WheelHandler {
-             property: "offset"
--            rotationScale: (1 / 15) * 0.01
-+            /* dace/CORONA (22-09-2026): (1/15)*0.01 daba 0.01 item por notch
-+             * (~100 notches por item): la rueda parecia muerta. 1/15 = un item
-+             * por diente (rotation = 15 grados por notch; offset esta en items). */
-+            rotationScale: 1 / 15
-             onRotationChanged: snapTimer.restart()
+@@ -229,9 +235,22 @@ Item {
          }
  
+         WheelHandler {
+-            property: "offset"
+-            rotationScale: (1 / 15) * 0.01
+-            onRotationChanged: snapTimer.restart()
++            id: crownWheel
++            property real daceAccum: 0
++            // dace/CORONA: encoder continuo; daceDiv eventos por item (antes
++            // (1/15)*0.01 daba 0.01 item/notch: la rueda parecia muerta).
++            readonly property int daceDiv: 3
++            onWheel: (event) => {
++                daceAccum += event.angleDelta.y / 120.0
++                var steps = 0
++                while (daceAccum >= daceDiv)  { daceAccum -= daceDiv; steps += 1 }
++                while (daceAccum <= -daceDiv) { daceAccum += daceDiv; steps -= 1 }
++                if (steps !== 0) {
++                    offset = Math.round(offset) + steps
++                    snapTimer.restart()
++                }
++                event.accepted = true
++            }
+         }
+ 
+         Timer {
+diff --git a/src/crownbuttonhandler.cpp b/src/crownbuttonhandler.cpp
+new file mode 100644
+index 0000000..64f0b40
+--- /dev/null
++++ b/src/crownbuttonhandler.cpp
+@@ -0,0 +1,27 @@
++/*
++ * dace (TicWatch Pro 5): pulsador de la corona. Ver crownbuttonhandler.h.
++ */
++
++#include "crownbuttonhandler.h"
++
++#include <QEvent>
++#include <QKeyEvent>
++
++CrownButtonHandler::CrownButtonHandler(QObject *parent) : QObject(parent)
++{
++}
++
++bool CrownButtonHandler::eventFilter(QObject *obj, QEvent *event)
++{
++    if (event->type() == QEvent::KeyPress) {
++        QKeyEvent *ke = static_cast<QKeyEvent *>(event);
++        // Key_MenuKB es a lo que el keymap de AsteroidOS mapea KEY_MENU (139).
++        // Key_Menu se acepta tambien por si cambia el keymap.
++        if (!ke->isAutoRepeat() &&
++            (ke->key() == Qt::Key_MenuKB || ke->key() == Qt::Key_Menu)) {
++            emit pressed();
++            return true; // consumida: no la reenviamos a la escena
++        }
++    }
++    return QObject::eventFilter(obj, event);
++}
+\ No newline at end of file
+diff --git a/src/crownbuttonhandler.h b/src/crownbuttonhandler.h
+new file mode 100644
+index 0000000..15a18d4
+--- /dev/null
++++ b/src/crownbuttonhandler.h
+@@ -0,0 +1,31 @@
++/*
++ * dace (TicWatch Pro 5): pulsador de la corona.
++ *
++ * El pulsador emite KEY_MENU (139) en /dev/input/event0 (gpio-keys). El keymap
++ * de AsteroidOS lo mapea a Qt::Key_MenuKB. La escena "home" del launcher NO
++ * recibe foco de teclado (MainScreen.crownPressed() nunca se disparaba con
++ * Keys.onPressed), asi que la tecla se captura con un filtro de eventos global
++ * instalado en la QGuiApplication -- el mismo patron que usa lipstick para los
++ * botones de volumen (VolumeControl::eventFilter). Al recibirla se emite
++ * `pressed()`, que compositor.qml reenvia a MainScreen.
++ */
++#ifndef CROWNBUTTONHANDLER_H
++#define CROWNBUTTONHANDLER_H
++
++#include <QObject>
++
++class CrownButtonHandler : public QObject
++{
++    Q_OBJECT
++
++public:
++    explicit CrownButtonHandler(QObject *parent = nullptr);
++
++signals:
++    void pressed();
++
++protected:
++    bool eventFilter(QObject *obj, QEvent *event) override;
++};
++
++#endif // CROWNBUTTONHANDLER_H
+\ No newline at end of file
+diff --git a/src/main.cpp b/src/main.cpp
+index c676c4d..bb98577 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -46,6 +46,7 @@
+ #include "notificationsnoozer.h"
+ #include "applauncher.h"
+ #include "watchfacereloader.h"
++#include "crownbuttonhandler.h"
+ 
+ int main(int argc, char **argv)
+ {
+@@ -92,6 +93,14 @@ int main(int argc, char **argv)
+     qmlRegisterType<NotificationSnoozer>("org.asteroid.launcher", 1, 0, "NotificationSnoozer");
+     qmlRegisterType<AppLauncher>("org.asteroid.launcher", 1, 0, "AppLauncher");
+ 
++    /* dace: pulsador de la corona (KEY_MENU -> Qt::Key_MenuKB). La escena home
++     * no recibe foco de teclado, asi que se captura con un filtro de eventos
++     * GLOBAL (mismo patron que lipstick/VolumeControl). compositor.qml conecta
++     * a su signal `pressed` y llama a MainScreen.crownPressed(). */
++    CrownButtonHandler *crownButton = new CrownButtonHandler();
++    app.installEventFilter(crownButton);
++    app.engine()->rootContext()->setContextProperty("crownButton", crownButton);
++
+     // Give these to the environment inside the launcher's wayland compositor
+     // Fixes a bug where some applications wouldn't launch, eg. terminal or browser
+     setenv("EGL_PLATFORM", "wayland", 1);
 diff --git a/src/qml/MainScreen.qml b/src/qml/MainScreen.qml
-index 3d78ce9..ff88469 100644
+index 3d78ce9..80d864b 100644
 --- a/src/qml/MainScreen.qml
 +++ b/src/qml/MainScreen.qml
-@@ -48,6 +48,28 @@ Item {
+@@ -48,6 +48,25 @@ Item {
      visible: Lipstick.compositor.homeActive || aboutToOpen || aboutToClose || aboutToMinimize
      enabled: visible
  
-+    /* dace/CORONA (22-09-2026): el pulsador de la corona emite KEY_MENU (139) en
-+     * /dev/input/event0 (gpio-keys, driver del vendor). Qt lo entrega como
-+     * Qt.Key_Menu. Si la lista de apps esta abierta, activa la app seleccionada;
-+     * si no, abre la lista. Requiere foco de teclado en la escena home. */
-+    focus: visible
-+    Keys.onPressed: (event) => {
-+        // El keymap de AsteroidOS (keys.kmap -> kmap2qmap) mapea KEY_MENU (139)
-+        // a Qt::Key_MenuKB (parche 0001-kmap2qmap-Map-MenuKB-key). Key_Menu no
-+        // existe en ese mapa, por eso se aceptan ambos por si se cambia.
-+        if (event.key === Qt.Key_MenuKB || event.key === Qt.Key_Menu) {
-+            event.accepted = true
-+            if (grid.currentVerticalPos === 1) {
-+                if (Desktop.appLauncher && Desktop.appLauncher.launchSelected)
-+                    Desktop.appLauncher.launchSelected()
-+                else
-+                    grid.moveTo(0, 0)
-+            } else {
-+                grid.moveTo(0, 1)
-+            }
++    /* dace/CORONA (22-09-2026): el pulsador de la corona. Lo entrega el filtro
++     * de eventos GLOBAL (CrownButtonHandler, src/main.cpp): esta escena NO
++     * recibe foco de teclado, con Keys.onPressed la tecla nunca llegaba.
++     * compositor.qml reenvia su signal `pressed` aqui como crownPressed().
++     * Si la lista de apps esta abierta, activa la app seleccionada; si no, la
++     * abre. */
++    function crownPressed() {
++        if (!visible)
++            return
++        if (grid.currentVerticalPos === 1) {
++            if (Desktop.appLauncher && Desktop.appLauncher.launchSelected)
++                Desktop.appLauncher.launchSelected()
++            else
++                grid.moveTo(0, 0)
++        } else {
++            grid.moveTo(0, 1)
 +        }
 +    }
 +
      // Requests the active watchface Loader to reload from disk. A signal, so
      // the handler can live in the Loader's own scope.
      signal watchfaceReloadRequested()
+diff --git a/src/qml/compositor/compositor.qml b/src/qml/compositor/compositor.qml
+index c7b6c04..8d53f7f 100644
+--- a/src/qml/compositor/compositor.qml
++++ b/src/qml/compositor/compositor.qml
+@@ -44,6 +44,17 @@ Item {
+     height: Dims.h(100)
+     rotation: Screen.angleBetween(Screen.primaryScreen, Lipstick.compositor.screenOrientation)
+ 
++    // dace/CORONA: pulsador de la corona. CrownButtonHandler (src/main.cpp) lo
++    // captura con un filtro global (la escena no recibe foco de teclado) y aqui
++    // se reenvia a la home.
++    Connections {
++        target: crownButton
++        function onPressed() {
++            if (homeLoader.item)
++                homeLoader.item.crownPressed()
++        }
++    }
++
+     // The home screen is a persistent item at the bottom of the z-stack, not
+     // an in-process "window". Its z follows MainScreen's own z (raised while
+     // the splash is up) so it can sit above running apps when needed.
