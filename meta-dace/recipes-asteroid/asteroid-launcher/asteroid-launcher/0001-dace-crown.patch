@@ -1,3 +1,16 @@
+From: dace bring-up <dace@localhost>
+Subject: [PATCH] dace: launcher consume la corona (rueda REL_WHEEL + pulsador KEY_MENU)
+
+La rueda de la corona (slate-spi, event2) llega como QWheelEvent a traves del
+plugin generico evdevmouse de Qt, pero el estilo por defecto del launcher
+(000-default-horizontal.qml) no tiene WheelHandler -> la lista de apps no se
+movia. El pulsador de la corona emite KEY_MENU (139) en event0 (gpio-keys) y
+tampoco se consumia. Ambos son especificos del hardware de esta variante
+(dace / TicWatch Pro 5 con el MCU slate), no upstreamables.
+
+Upstream-Status: Inappropriate [dace bring-up]
+
+---
 diff --git a/src/applauncher/000-default-horizontal.qml b/src/applauncher/000-default-horizontal.qml
 index cdcd723..46d9cd6 100644
 --- a/src/applauncher/000-default-horizontal.qml
