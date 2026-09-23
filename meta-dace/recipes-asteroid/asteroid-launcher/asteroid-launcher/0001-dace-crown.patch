@@ -71,10 +71,10 @@ index 87f77f1..fd4956b 100644
  add_executable(asteroid-launcher ${SRC} ${HEADERS} resources-qml.qrc)
  
 diff --git a/src/applauncher/000-default-horizontal.qml b/src/applauncher/000-default-horizontal.qml
-index cdcd723..c4da376 100644
+index cdcd723..466c008 100644
 --- a/src/applauncher/000-default-horizontal.qml
 +++ b/src/applauncher/000-default-horizontal.qml
-@@ -42,6 +42,45 @@ Item {
+@@ -42,6 +42,48 @@ Item {
      property bool fakePressed: false
  
      anchors.fill: parent
@@ -87,19 +87,22 @@ index cdcd723..c4da376 100644
 +    function launchSelected() {
 +        var idx = Math.round(appsListView.contentX / appsListView.width)
 +        idx = Math.max(0, Math.min(appsListView.count - 1, idx))
-+        console.log("dace crown: launchSelected idx=" + idx + " count=" + appsListView.count)
 +        var it = launcherModel.get(idx)
-+        if (it && it.object)
-+            it.object.launchApplication()
-+        else
-+            console.log("dace crown: launchSelected sin objeto")
++        // launcherModel.get() puede devolver el item directo o un wrapper con
++        // .object segun el modelo: aceptamos los dos (antes solo .object ->
++        // "sin objeto" y no lanzaba nada).
++        var obj = (it && it.object !== undefined) ? it.object : it
++        if (obj && obj.launchApplication)
++            obj.launchApplication()
 +    }
 +
 +    WheelHandler {
 +        id: crownWheel
 +        property real daceAccum: 0
-+        // dace/CORONA: encoder continuo -> daceDiv eventos por item.
-+        readonly property int daceDiv: 3
++        // dace/CORONA: encoder continuo -> daceDiv eventos por item. En la lista
++        // de apps 3 era demasiado sensible (mueve un item entero por paso); 6
++        // va mas fino. Subir daceDiv = menos sensible.
++        readonly property int daceDiv: 6
 +        onWheel: (event) => {
 +            daceAccum += event.angleDelta.y / 120.0
 +            var steps = 0
@@ -263,10 +266,10 @@ index c676c4d..bb98577 100644
      // Fixes a bug where some applications wouldn't launch, eg. terminal or browser
      setenv("EGL_PLATFORM", "wayland", 1);
 diff --git a/src/qml/MainScreen.qml b/src/qml/MainScreen.qml
-index 3d78ce9..e3f4da1 100644
+index 3d78ce9..80d864b 100644
 --- a/src/qml/MainScreen.qml
 +++ b/src/qml/MainScreen.qml
-@@ -48,6 +48,28 @@ Item {
+@@ -48,6 +48,25 @@ Item {
      visible: Lipstick.compositor.homeActive || aboutToOpen || aboutToClose || aboutToMinimize
      enabled: visible
  
@@ -279,9 +282,6 @@ index 3d78ce9..e3f4da1 100644
 +    function crownPressed() {
 +        if (!visible)
 +            return
-+        console.log("dace crown: crownPressed vpos=" + grid.currentVerticalPos
-+                    + " appLauncher=" + (Desktop.appLauncher ? "si" : "no")
-+                    + " launchSelected=" + (Desktop.appLauncher && Desktop.appLauncher.launchSelected ? "si" : "no"))
 +        if (grid.currentVerticalPos === 1) {
 +            if (Desktop.appLauncher && Desktop.appLauncher.launchSelected)
 +                Desktop.appLauncher.launchSelected()
