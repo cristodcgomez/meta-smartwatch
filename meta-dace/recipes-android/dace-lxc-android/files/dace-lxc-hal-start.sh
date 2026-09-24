@@ -75,6 +75,28 @@ sleep 3
 grep -q "zinitix_ts" /proc/bus/input/devices 2>/dev/null && echo "dace-hal: tactil PRESENTE (zinitix_ts vendor)" \
     || echo "dace-hal: tactil AUSENTE"
 
+# ─────────────────── BATERÍA (E1): smblite TEMPRANO ───────────────────
+# En stock `qpnp-smblite-main` va en el ramdisk (mucho antes que el MCU). El
+# remote-FG se registra para GMI_SLATE_EVENT_QBG y pide datos; si el MCU sólo
+# streamea a clientes registrados antes de su boot, cargarlo tarde
+# (dace-slate-mcu) no bastaría. Aquí el bridge STOCK ya está cargado (arriba).
+# `insmod -f`: nuestro .ko (:tp, google-eos) trae el CRC de seb_* del bridge de
+# google-eos, pero en el reloj va el bridge STOCK (lo necesita zinitix) -> hay
+# que saltar sólo ese chequeo (es NUESTRO módulo, sin SCS: seguro).
+# Requiere el DTB con `dpdm-supply` quitado del nodo smblite (dace-boot-images),
+# si no el probe se cuelga en devm_regulator_get("dpdm").
+modprobe gvotable 2>/dev/null
+KREL=$(uname -r)
+if ! grep -q '^qpnp_smblite_main ' /proc/modules; then
+    if [ -e "/lib/modules/$KREL/vendor/qpnp-smblite-main.ko" ]; then
+        insmod -f "/lib/modules/$KREL/vendor/qpnp-smblite-main.ko" 2>/dev/null \
+            && echo "dace-lxc-hal-start: smblite cargado (battery psy temprano)" \
+            || echo "dace-lxc-hal-start: aviso, no se pudo cargar smblite"
+    else
+        echo "dace-lxc-hal-start: aviso, falta /lib/modules/$KREL/vendor/qpnp-smblite-main.ko"
+    fi
+fi
+
 # Comprobacion: que el servicio responda (el cliente lo pide por el bus)
 sleep 5
 lxc-attach -n android -- /system/bin/sh -c '
