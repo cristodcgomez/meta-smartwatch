@@ -177,6 +177,36 @@ else
     log "AVISO: slate_bt_state no esta ready (revisar el enlace glink)"
 fi
 
+# 6b) BATERÍA (24-09-2026): cargar qpnp-smblite-main AHORA, con el MCU ya
+#     listo. Es el driver que crea /sys/class/power_supply/battery (y "usb")
+#     y lee la capacidad por el remote-FG del MCU (slate_events_bridge).
+#     - Se carga con `insmod -f` porque nuestro .ko (:tp, google-eos) importa
+#       seb_* con el CRC de NUESTRO slate_events_bridge, pero en el reloj se
+#       carga el bridge STOCK (lo necesita zinitix): el CRC no coincide y
+#       `insmod` normal falla con "disagrees about version of symbol". `-f`
+#       salta solo ese chequeo (es NUESTRO modulo, sin SCS: es seguro).
+#     - El DTB lleva eliminado `dpdm-supply` del nodo smblite
+#       (dace-boot-images.bb): sin eso el probe se cuelga en
+#       devm_regulator_get("dpdm").
+#     - OJO: al aparecer la psy "usb" (USB Present=1) usb-moded puede cambiar
+#       el modo USB (mass storage) y perderse adb. Ver PLAN-ENERGIA.md.
+if ! grep -q '^qpnp_smblite_main ' /proc/modules; then
+    KREL=$(uname -r)
+    if [ -e "/lib/modules/$KREL/vendor/qpnp-smblite-main.ko" ]; then
+        if insmod -f "/lib/modules/$KREL/vendor/qpnp-smblite-main.ko" >> /run/dace-slate-mcu.log 2>&1; then
+            i=0
+            while [ $i -lt 10 ] && [ ! -e /sys/class/power_supply/battery ]; do
+                i=$((i + 1)); sleep 1
+            done
+            log "bateria: smblite cargado; battery=$(cat /sys/class/power_supply/battery/capacity 2>/dev/null)% status=$(cat /sys/class/power_supply/battery/status 2>/dev/null)"
+        else
+            log "AVISO: no se pudo cargar qpnp-smblite-main (insmod -f)"
+        fi
+    else
+        log "AVISO: falta /lib/modules/$KREL/vendor/qpnp-smblite-main.ko"
+    fi
+fi
+
 # 7) Esperar a que el controlador quede operativo (hci0 con BD address).
 # OJO: el bring-up REAL tarda ~100 s desde aqui: el HAL esta relanzado pero su
 # primer intento con el chip ya alimentado llega en el siguiente ciclo (~60 s) y

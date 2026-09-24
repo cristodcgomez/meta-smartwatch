@@ -255,6 +255,19 @@ do_compile() {
         else
             bbwarn "$dtb: falta monaco-idp-v1-overlay.dtbo"
         fi
+        # ── ENERGÍA: quitar `dpdm-supply` del smblite (23-09/24-09-2026) ────
+        # MEDIDO: con el smblite cargado, el probe se cuelga (hard hang,
+        # IRQs-off) en `smblite_lib_request_dpdm()` ->
+        # `devm_regulator_get(chg->dev, "dpdm")`. El `dpdm-supply` apunta a
+        # `&usb2_phy0` (hsphy@1613000) y el lookup del regulador se queda
+        # atascado. Saltando ese bloque, el probe COMPLETA y aparece
+        # /sys/class/power_supply/battery con el remote-FG del MCU.
+        # DPDM es sólo la detección de tipo de cargador por D+/D-; el USB de
+        # datos (dwc3/adb) NO lo usa. Quitando la propiedad el driver ni
+        # siquiera entra en el regulator_get. Reversible (basta no borrarla).
+        "$FDTPUT" -d ${WORKDIR}/${dtb}-per.dtb \
+            /soc/qcom,spmi@1c40000/qcom,pm5100@0/qcom,qpnp-smblite dpdm-supply \
+            && bbnote "$dtb: smblite dpdm-supply eliminado (evita el hang del regulator_get)"
         # ── BT/WCN3988: el compatible decide el SOC en el HAL; los rieles, si hay chip ─
         # 1) COMPATIBLE: el HAL lee el PRIMERO y de ahi saca el tipo de SOC
         #    ("Soc version recevied : qcom,qcc5100" -> **slate**). Con
