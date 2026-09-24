@@ -1,0 +1,98 @@
+From: TicWatch Pro 5 port
+Subject: [PATCH] usb: dwc3: dwc3-msm: reintentar registrar el extcon del smblite
+
+El dwc3 probea en el initramfs y el smblite (que aporta el extcon
+pm5100_charger con EXTCON_USB) en el rootfs. Con el parche
+dwc3-msm-force-vbus-peripheral, vbus_active queda forzado true para
+siempre -> el controlador USB nunca entra en LPM -> pm_stay_awake sin
+pm_relax -> la wakeup_source 4e00000.hsusb bloquea el autosleep.
+Aqui el dwc3 reintenta el registro del extcon (cada 1 s) y sigue
+siguiendo el estado USB del smblite, para que al desconectar se
+limpie vbus_active y el USB pueda suspender.
+Upstream-Status: Inappropriate [dace bring-up]
+---
+
+--- a/drivers/usb/dwc3/dwc3-msm-core.c
++++ b/drivers/usb/dwc3/dwc3-msm-core.c
+@@ -532,6 +532,7 @@
+ #define MDWC3_POWER_COLLAPSE		BIT(2)
+ #define MDWC3_USE_PWR_EVENT_IRQ_FOR_WAKEUP	BIT(3)
+ 	struct extcon_nb	*extcon;
++	struct delayed_work	extcon_retry_work;
+ 	int			ext_idx;
+ 	struct notifier_block	host_nb;
+ 
+@@ -4697,12 +4698,18 @@
+ 		return -ENODEV;
+ 	}
+ 
+-	mdwc->extcon = devm_kcalloc(mdwc->dev, extcon_cnt,
++	if (!mdwc->extcon) {
++		mdwc->extcon = devm_kcalloc(mdwc->dev, extcon_cnt,
+ 					sizeof(*mdwc->extcon), GFP_KERNEL);
+-	if (!mdwc->extcon)
+-		return -ENOMEM;
++		if (!mdwc->extcon)
++			return -ENOMEM;
++	}
+ 
+ 	for (idx = 0; idx < extcon_cnt; idx++) {
++		/* dace: ya registrado en una pasada anterior */
++		if (mdwc->extcon[idx].edev)
++			continue;
++
+ 		edev = extcon_get_edev_by_phandle(mdwc->dev, idx);
+ 		if (IS_ERR(edev)) {
+ 			if (PTR_ERR(edev) == -EPROBE_DEFER) {
+@@ -4750,9 +4757,13 @@
+ 						true, edev);
+ 	}
+ 
++	/* dace: si algun extcon aun no existe (p.ej. el del smblite, que probea
++	 * en el rootfs), pedir reintento. El probe lo maneja: sigue con los que
++	 * si existen y programa un work de reintento, para no perder el USB. */
++	if (deferred)
++		return -EPROBE_DEFER;
++
+ 	if (!phandle_found) {
+-		if (deferred)
+-			return -EPROBE_DEFER;
+ 		dev_err(mdwc->dev, "no extcon device found\n");
+ 		return -ENODEV;
+ 	}
+@@ -4760,6 +4771,18 @@
+ 	return 0;
+ }
+ 
++static void dwc3_msm_extcon_retry_work(struct work_struct *work)
++{
++	struct dwc3_msm *mdwc = container_of(to_delayed_work(work),
++					struct dwc3_msm, extcon_retry_work);
++	int ret;
++
++	ret = dwc3_msm_extcon_register(mdwc);
++	if (ret == -EPROBE_DEFER)
++		schedule_delayed_work(&mdwc->extcon_retry_work,
++					msecs_to_jiffies(1000));
++}
++
+ static bool dwc3_msm_role_allowed(struct dwc3_msm *mdwc, enum usb_role role)
+ {
+ 	dev_dbg(mdwc->dev, "%s: dr_mode=%s role_requested=%s\n",
+@@ -5934,7 +5957,16 @@
+ 	}
+ 
+ 	if (of_property_read_bool(node, "extcon")) {
++		INIT_DELAYED_WORK(&mdwc->extcon_retry_work,
++					dwc3_msm_extcon_retry_work);
+ 		ret = dwc3_msm_extcon_register(mdwc);
++		if (ret == -EPROBE_DEFER) {
++			/* dace: el extcon del smblite aun no existe. Seguir con
++			 * los que si (EUD) y reintentar cada segundo. */
++			schedule_delayed_work(&mdwc->extcon_retry_work,
++						msecs_to_jiffies(1000));
++			ret = 0;
++		}
+ 		if (ret)
+ 			goto put_dwc3;
+ 	dace_glue_step = 6;
