@@ -1,0 +1,17 @@
+[Unit]
+Description=dace: log persistente de energia/suspend (para verificar sin adb)
+Documentation=file:///usr/libexec/dace-powerlog.sh
+After=multi-user.target
+ConditionPathExists=/sys/class/power_supply
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/dace-powerlog.sh
+Restart=always
+RestartSec=10
+# No escribir a journald (se atasca): el script escribe a /var/log/dace-power.log
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=multi-user.target

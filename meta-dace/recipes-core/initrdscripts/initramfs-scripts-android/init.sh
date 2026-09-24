@@ -400,6 +400,16 @@ if [ -x "$BOOT_DIR/lib/systemd/systemd" ] && [ "$DEBUG_RAMFS" = "0" ]; then
         sed -i 's/filter-brightness-als;//; s/;filter-brightness-als//' "$BOOT_DIR/etc/mce/10mce.ini"
         info "mce: filtro ALS quitado (T5 sin ALS funcional)"
     fi
+    # ── CHURN DE PROXIMIDAD -> SUSPEND (24-09-2026) ──────────────────────
+    # sensorfwd entra en crash-loop (hw_get_module falla; medido restart
+    # counter ~8300) y MCE recibe proximidad basura por libhybris cada ~5 s.
+    # Efecto: `mce_proximity_stm` retiene un wakelock y la pantalla vuelve a
+    # encenderse -> el autosleep NUNCA suspende. MEDIDO: con sensorfwd parado,
+    # 0 eventos de proximidad en 60 s, sin wakelocks, y la unica wakeup_source
+    # activa era el USB (`4e00000.hsusb`). Se enmascara (los sensores no
+    # funcionan hoy de todos modos). Reversible: rm el symlink.
+    ln -sf /dev/null "$BOOT_DIR/etc/systemd/system/sensorfwd.service"
+    info "sensorfwd enmascarado (churn proximidad -> posibilita el suspend)"
     # Desenmascarar el USB del rootfs (un boot de debug anterior pudo
     # enmascararlo para proteger la consola). Con esto usb-moded del rootfs
     # levanta adb (fix PREFERRED_PROVIDER android-tools-conf-configfs).
