@@ -214,5 +214,21 @@ done
 if [ -e "$RSB" ] && [ "$n" -ge 5 ]; then
     log "AVISO: corona: enable no aceptado x5 (buscar 'slatersb' en dmesg)"
 fi
+
+# 9) Verificación de BATERÍA en fichero persistente (24-09-2026). El smblite se
+#    carga TEMPRANO en dace-lxc-hal-start; aquí (tarde) ya ha tenido tiempo de
+#    recibir (o no) los datos QBG del MCU. Sirve para leer el resultado aunque
+#    usb-moded cambie a mass storage y se pierda adb.
+{
+    echo "=== battery report $(date) ==="
+    ls /sys/class/power_supply/ 2>&1
+    for p in /sys/class/power_supply/*; do
+        echo "$(basename $p): cap=$(cat $p/capacity 2>/dev/null) status=$(cat $p/status 2>/dev/null) present=$(cat $p/present 2>/dev/null) volt=$(cat $p/voltage_now 2>/dev/null) online=$(cat $p/online 2>/dev/null)"
+    done
+    echo "-- dmesg --"
+    dmesg 2>/dev/null | grep -iE 'REMOTE-FG|remote_bms|QBG|smblite|Battery present' | tail -15
+} > /var/log/dace-battery.log 2>&1
+sync
+
 dmesg 2>/dev/null | grep -iE 'slatersb|slate_rsb' | tail -n 10 >> /var/log/dace-slate-mcu.log 2>/dev/null
 exit 0
