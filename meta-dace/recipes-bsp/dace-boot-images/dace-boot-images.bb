@@ -255,6 +255,27 @@ do_compile() {
         else
             bbwarn "$dtb: falta monaco-idp-v1-overlay.dtbo"
         fi
+        # ── EXPERIMENTO WLAN (26-09-2026): icnss estilo aurora ────────────────
+        # PLAN-WLAN.md §6-§8: la UNICA diferencia de fondo con aurora (que
+        # tiene WiFi) es que en dace la RF del WLAN vive en el MCU slate
+        # (`qcom,is_slate_rfa=1`, `rf_subtype=0`), mientras que en aurora esta
+        # en el modem (`rf_subtype=1`/APACHE, sin `is_slate_rfa`). El firmware
+        # del modem muere con DOG sin que arranque su WLAN PD (no registra
+        # `wlan/fw` en el servloc). Hipotesis: el WLAN PD se atasca esperando
+        # la RF del slate. Este experimento hace que el icnss de dace se vea
+        # como el de aurora:
+        #   - borra `qcom,is_slate_rfa` (con `fdtput -d`; OJO: no vale ponerlo
+        #     a 0 -- `of_property_read_bool` solo mira si EXISTE)
+        #   - pone `qcom,rf_subtype = <1>` (WLFW_WLAN_RF_APACHE_V01)
+        # Asi icnss2 no se bloquea esperando el SSR de `slatefw` y pide la RF
+        # APACHE. Si el DOG desaparece y aparece `wlan0`, queda confirmado el
+        # acoplamiento modem<->slate. REVERTIR el experimento = borrar estas 2
+        # lineas. Ver PLAN-WLAN.md.
+        "$FDTPUT" -d ${WORKDIR}/${dtb}-per.dtb /soc/qcom,icnss@C800000 \
+            qcom,is_slate_rfa
+        "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/qcom,icnss@C800000 \
+            qcom,rf_subtype 1
+        bbnote "$dtb: WLAN experimento -- icnss sin is_slate_rfa + rf_subtype=1 (APACHE)"
         # ── ENERGÍA / CARGA: se CONSERVA `dpdm-supply` del smblite ───────────
         # El smblite usa `dpdm-supply = <&usb2_phy0>` (hsphy@1613000, phandle
         # 0x30) para habilitar el regulador DPDM que registra phy-msm-snps-hs:
