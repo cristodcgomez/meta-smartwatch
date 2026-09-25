@@ -71,18 +71,33 @@ while [ $i -lt 300 ]; do
 done
 log "slate_bt_state=$(cat /sys/kernel/slate_bt_state/slate_bt_state 2>/dev/null) (esperado ready)"
 
-# 4) cnss-daemon en el contenedor ------------------------------------------
-if ! grep -ql cnss-daemon /proc/[0-9]*/comm 2>/dev/null; then
-    # /data/vendor/wifi/sockets ya existe (lo crea dace-lxc-android-start.sh):
-    # cnss-daemon bindea su user socket y luego wlfw_start.
-    timeout 15 lxc-attach -n android -- /system/bin/setprop ctl.start cnss-daemon 2>/dev/null
-    sleep 3
-fi
-if grep -ql cnss-daemon /proc/[0-9]*/comm 2>/dev/null; then
-    log "cnss-daemon corriendo"
-else
-    log "AVISO: cnss-daemon NO corre (¿/data/vendor/wifi/sockets?)"
-fi
+# 4) servicios del contenedor que el stock arranca y el nuestro NO ------------
+#  - cnss-daemon: puente cnss-genl del WLAN; necesita /data/vendor/wifi/sockets
+#    (lo crea dace-lxc-android-start.sh ANTES del init de Android).
+#  - vendor.pd_mapper: servidor "servloc"/Servreg (PD mapper). Parsea los
+#    *.jsn del firmware (incluido modemr/modemuw.jsn) y sirve el mapeo de
+#    Protection Domains por QMI. El init de nuestro contenedor NO arranca los
+#    servicios de `class core` de init.target.rc (getprop init.svc.vendor.
+#    pd_mapper = vacio): sin el no hay service locator para el modem/ADSP.
+#  - vendor.per_mgr: gestor de perifericos (pm-service) del stock.
+_started=""
+for _s in cnss-daemon vendor.pd_mapper vendor.per_mgr; do
+    if grep -ql "${_s##*.}" /proc/[0-9]*/comm 2>/dev/null; then
+        _started="$_started ${_s}(ya)"
+        continue
+    fi
+    timeout 15 lxc-attach -n android -- /system/bin/setprop ctl.start "$_s" 2>/dev/null
+    _started="$_started ${_s}"
+done
+sleep 3
+log "servicios contenedor:$_started"
+for _s in cnss-daemon vendor.pd_mapper vendor.per_mgr; do
+    if grep -ql "${_s##*.}" /proc/[0-9]*/comm 2>/dev/null; then
+        log "  $_s corriendo"
+    else
+        log "  AVISO: $_s NO corre"
+    fi
+done
 
 # 5) arrancar el modem (gate) ----------------------------------------------
 if [ -e /etc/dace-kick-modem ]; then
