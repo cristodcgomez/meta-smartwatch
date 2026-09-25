@@ -255,19 +255,20 @@ do_compile() {
         else
             bbwarn "$dtb: falta monaco-idp-v1-overlay.dtbo"
         fi
-        # ── ENERGÍA: quitar `dpdm-supply` del smblite (23-09/24-09-2026) ────
-        # MEDIDO: con el smblite cargado, el probe se cuelga (hard hang,
-        # IRQs-off) en `smblite_lib_request_dpdm()` ->
-        # `devm_regulator_get(chg->dev, "dpdm")`. El `dpdm-supply` apunta a
-        # `&usb2_phy0` (hsphy@1613000) y el lookup del regulador se queda
-        # atascado. Saltando ese bloque, el probe COMPLETA y aparece
-        # /sys/class/power_supply/battery con el remote-FG del MCU.
-        # DPDM es sólo la detección de tipo de cargador por D+/D-; el USB de
-        # datos (dwc3/adb) NO lo usa. Quitando la propiedad el driver ni
-        # siquiera entra en el regulator_get. Reversible (basta no borrarla).
-        "$FDTPUT" -d ${WORKDIR}/${dtb}-per.dtb \
-            /soc/qcom,spmi@1c40000/qcom,pm5100@0/qcom,qpnp-smblite dpdm-supply \
-            && bbnote "$dtb: smblite dpdm-supply eliminado (evita el hang del regulator_get)"
+        # ── ENERGÍA / CARGA: se CONSERVA `dpdm-supply` del smblite ───────────
+        # El smblite usa `dpdm-supply = <&usb2_phy0>` (hsphy@1613000, phandle
+        # 0x30) para habilitar el regulador DPDM que registra phy-msm-snps-hs:
+        # pone el PHY en modo "non-driving" para que el PMIC complete la
+        # deteccion de cargador (BC1.2/APSD). Sin DPDM, POWER_PATH_STATUS no
+        # tiene USE_USBIN -> `usb/online=0` -> ICL 2 mA -> **el reloj no carga**
+        # (medido 25-09-2026: la carga funcionaba en bootloader pero no en
+        # Linux). Antes se borraba esta propiedad porque el probe del smblite
+        # se colgaba en smblite_lib_request_dpdm(); ahora el driver del PHY ya
+        # lleva el parche "dace B: sin control de LDOs" (msm_hsphy_enable_power
+        # sale sin tocar reguladores si faltan) y el regulador DPDM esta
+        # registrado (regulator.56: hsphy@1613000), asi que se prueba otra vez.
+        # Reversible: si volviera a colgarse, restaurar el `fdtput -d`.
+        bbnote "$dtb: smblite CONSERVA dpdm-supply (deteccion de cargador DPDM)"
         # ── BT/WCN3988: el compatible decide el SOC en el HAL; los rieles, si hay chip ─
         # 1) COMPATIBLE: el HAL lee el PRIMERO y de ahi saca el tipo de SOC
         #    ("Soc version recevied : qcom,qcc5100" -> **slate**). Con
