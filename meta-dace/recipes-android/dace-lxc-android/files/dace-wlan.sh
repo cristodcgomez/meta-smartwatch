@@ -80,22 +80,41 @@ log "slate_bt_state=$(cat /sys/kernel/slate_bt_state/slate_bt_state 2>/dev/null)
 #    servicios de `class core` de init.target.rc (getprop init.svc.vendor.
 #    pd_mapper = vacio): sin el no hay service locator para el modem/ADSP.
 #  - vendor.per_mgr: gestor de perifericos (pm-service) del stock.
+# comando real que ejecuta cada servicio (== /proc/<pid>/comm)
+#   cnss-daemon        -> cnss-daemon
+#   vendor.pd_mapper   -> pd-mapper
+#   vendor.per_mgr     -> pm-service
+procs_of() {
+    case "$1" in
+        cnss-daemon)      echo cnss-daemon ;;
+        vendor.pd_mapper) echo pd-mapper ;;
+        vendor.per_mgr)   echo pm-service ;;
+        *)                echo "$1" ;;
+    esac
+}
+proc_running() {
+    _comm=$(procs_of "$1")
+    for _p in /proc/[0-9]*/comm; do
+        [ "$(cat "$_p" 2>/dev/null)" = "$_comm" ] && return 0
+    done
+    return 1
+}
 _started=""
 for _s in cnss-daemon vendor.pd_mapper vendor.per_mgr; do
-    if grep -ql "${_s##*.}" /proc/[0-9]*/comm 2>/dev/null; then
+    if proc_running "$_s"; then
         _started="$_started ${_s}(ya)"
-        continue
+    else
+        timeout 15 lxc-attach -n android -- /system/bin/setprop ctl.start "$_s" 2>/dev/null
+        _started="$_started ${_s}"
     fi
-    timeout 15 lxc-attach -n android -- /system/bin/setprop ctl.start "$_s" 2>/dev/null
-    _started="$_started ${_s}"
 done
 sleep 3
 log "servicios contenedor:$_started"
 for _s in cnss-daemon vendor.pd_mapper vendor.per_mgr; do
-    if grep -ql "${_s##*.}" /proc/[0-9]*/comm 2>/dev/null; then
-        log "  $_s corriendo"
+    if proc_running "$_s"; then
+        log "  $_s corriendo ($(procs_of "$_s"))"
     else
-        log "  AVISO: $_s NO corre"
+        log "  AVISO: $_s NO corre ($(procs_of "$_s"))"
     fi
 done
 
