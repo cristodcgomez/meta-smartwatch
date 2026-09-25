@@ -1,13 +1,17 @@
 [Unit]
 Description=dace: fijar el SDP current del USB para que el smblite cargue
-# El smblite (qpnp-smblite-main) se carga tarde (dace-lxc-hal-start), asi que
-# reintentamos unos segundos por si aun no existe la psy.
-After=multi-user.target dace-lxc-hal-start.service
+# El smblite (qpnp-smblite-main) crea la psy 'usb' tarde y puede re-inicializar
+# el usb_icl_votable a ~2 mA mas de una vez durante el arranque, asi que en vez
+# de un one-shot hacemos un bucle ligero (el script es idempotente y sale en
+# cuanto online=1 / icl>=500 mA).
+After=dace-lxc-hal-start.service
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/sh -c 'for i in 1 2 3 4 5 6 7 8 9 10; do /usr/libexec/dace-usb-icl.sh; sleep 2; done'
+Type=simple
+ExecStart=/bin/sh -c 'while true; do /usr/libexec/dace-usb-icl.sh; sleep 30; done'
+Restart=always
+RestartSec=5
+Nice=10
 
 [Install]
 WantedBy=multi-user.target
