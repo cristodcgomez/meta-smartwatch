@@ -13,6 +13,10 @@ while true; do
         echo "last_failed_dev=$(cat /sys/power/suspend_stats/last_failed_dev 2>/dev/null)"
         echo "wake_lock=[$(cat /sys/power/wake_lock 2>/dev/null | tr '\n' ' ')]"
         echo "battery_capacity=$(cat /sys/class/power_supply/battery/capacity 2>/dev/null)"
+        echo "battery_status=$(cat /sys/class/power_supply/battery/status 2>/dev/null) current_now=$(cat /sys/class/power_supply/battery/current_now 2>/dev/null)"
+        echo "usb=[online=$(cat /sys/class/power_supply/usb/online 2>/dev/null) present=$(cat /sys/class/power_supply/usb/present 2>/dev/null) icl=$(cat /sys/class/power_supply/usb/input_current_limit 2>/dev/null)]"
+        echo "extcon=[$(for e in /sys/class/extcon/extcon*; do printf '%s=%s ' "$(cat $e/name 2>/dev/null | sed 's/.*,//')" "$(cat $e/state 2>/dev/null | tr '\n' ',')"; done)]"
+        echo "dwc=\"$(cat /sys/bus/platform/devices/4e00000.hsusb/power/runtime_status 2>/dev/null)/$(cat /sys/bus/platform/devices/4e00000.hsusb/power/control 2>/dev/null)\""
         echo "active_wakeup_sources=[$(awk 'NR>1 && $6>0 {print $1}' /sys/kernel/debug/wakeup_sources 2>/dev/null | tr '\n' ' ')]"
     } >> "$LOG" 2>&1
     # recorte: que no crezca sin límite en la eMMC

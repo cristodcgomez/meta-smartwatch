@@ -1,0 +1,26 @@
+From: TicWatch Pro 5 port
+Subject: [PATCH] usb: dwc3: dwc3-msm: propagar el cambio de vbus en dr_mode=peripheral
+
+El state machine (dwc3_ext_event_notify: B_SESS_VLD) solo se re-evalua si
+se encola resume_work, y el vbus_notifier solo lo hacia para dr_mode=OTG.
+En dr_mode=peripheral el extcon actualizaba vbus_active pero el controlador
+no entraba en LPM al desconectar: el wakeup source 4e00000.hsusb quedaba
+activo (active_count=1 desde el boot) y autosleep no suspendia nunca.
+Upstream-Status: Inappropriate [dace bring-up]
+---
+
+--- a/drivers/usb/dwc3/dwc3-msm-core.c
++++ b/drivers/usb/dwc3/dwc3-msm-core.c
+@@ -4678,7 +4678,11 @@
+ 	}
+ 
+ 	mdwc->ext_idx = enb->idx;
+-	if (mdwc->dr_mode == USB_DR_MODE_OTG && !mdwc->in_restart)
++	/* dace: en dr_mode=peripheral tambien hay que re-evaluar el state
++	 * machine (B_SESS_VLD) al cambiar el vbus, o al desconectar el cable el
++	 * controlador no entra en LPM, el wakeup source queda activo y bloquea
++	 * autosleep. resume_work -> dwc3_ext_event_notify -> sm_work. */
++	if (!mdwc->in_restart)
+ 		queue_work(mdwc->dwc3_wq, &mdwc->resume_work);
+ 
+ 	return NOTIFY_DONE;
