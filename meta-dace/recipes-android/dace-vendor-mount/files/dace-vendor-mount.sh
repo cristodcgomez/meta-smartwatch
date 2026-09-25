@@ -143,29 +143,17 @@ for r in /sys/class/remoteproc/remoteproc*; do
     echo enabled > "$r/recovery" 2>/dev/null && \
         echo "dace-vendor-mount: $(basename $r) recovery -> enabled" > /dev/kmsg || true
 done
+# OJO: el modem (remoteproc1) tambien queda con recovery=enabled: el DOG de su
+# firmware (si algun dia se arranca para la WLAN) NO resetea el SoC; el driver
+# lo relanza solo (fue el fix del 19-09-2026).
 
-# ─ ORDEN DE AURORA: primero el MODEM, luego el ADSP ──────────────────────────
-# El aurora-vendor-mount.sh de aurora hace exactamente esto: monta el firmware,
-# fija firmware_class.path y escribe `start` en remoteproc1 (modem). El ADSP lo
-# arranca despues el contenedor (linea boot_adsp de init.qti.kernel.rc). Aqui
-# dejamos a mano el orden inverso para probarlo: el modem primero (con el
-# firmware ya visible) y el ADSP inmediatamente despues (para que llegue dentro
-# de la ventana de ~40 s antes del DOG del fw del modem, que espera al ADSP via
-# tmr_slave2). GATEADO tras /etc/dace-kick-modem para que un rootfs recien
-# flasheado bootee estable (arrancar el modem hoy puede resetear el SoC).
-if [ -e /etc/dace-kick-modem ] && \
-   [ "$(cat /sys/class/remoteproc/remoteproc1/state 2>/dev/null)" = "offline" ]; then
-    echo start > /sys/class/remoteproc/remoteproc1/state 2>/dev/null && \
-        echo "dace-vendor-mount: kicked remoteproc-mss (modem) FIRST (aurora order)" > /dev/kmsg || true
-    i=0
-    while [ $i -lt 25 ] && \
-          [ "$(cat /sys/class/remoteproc/remoteproc1/state 2>/dev/null)" = "offline" ]; do
-        sleep 0.2; i=$((i+1))
-    done
-    echo "dace-vendor-mount: mss state=$(cat /sys/class/remoteproc/remoteproc1/state 2>/dev/null)" > /dev/kmsg || true
-fi
-
-# ─ Arrancar el ADSP (despues del modem, orden aurora) ────────────────────────
+# ─ Arrancar el ADSP (el fw del modem/WLAN lo espera vivo) ───────────────────
+# El MODEM (remoteproc1) ya NO se arranca aqui. En dace el WLAN necesita al
+# menos el orden: cadena qcacld/icnss2 cargada -> MCU slate UP (icnss2 usa
+# qcom,is_slate_rfa y espera el SSR de "slatefw") -> modem. Arrancarlo tan
+# temprano (antes del slate y de la cadena WLAN) solo alimentaba el crash-loop
+# `DOG detects stalled initialization`. El arranque del modem vive ahora en
+# dace-wlan.sh (gateado tras /etc/dace-kick-modem, ver PLAN-WLAN.md).
 # El fw del modem espera al ADSP vivo via tmr_slave2; sin ADSP el watchdog del
 # modem cuelga con "DOG detects stalled initialization" y se resetea en bucle.
 # OJO: monaco_adsp_resource NO tiene .auto_boot, asi que el ADSP no arranca

@@ -28,6 +28,8 @@ SRC_URI = "https://dl.dropboxusercontent.com/scl/fi/insvp7s5wp516iv56a4vx/dace-l
            file://dace-lxc-hal-start.service \
            file://dace-slate-mcu.sh \
            file://dace-slate-mcu.service \
+           file://dace-wlan.sh \
+           file://dace-wlan.service \
            file://dace-bt-power.pl \
            file://bluebinder-dace.conf"
 SRC_URI[md5sum] = "145a40e6e863afa6a00be6ad0fa28ea4"
@@ -124,6 +126,12 @@ do_install() {
         ${D}${libexecdir}/dace-slate-mcu.sh
     install -m 0644 ${UNPACKDIR}/dace-slate-mcu.service \
         ${D}${systemd_unitdir}/system/dace-slate-mcu.service
+    # Bring-up de la WLAN: cadena qcacld/icnss2 + ADSP + cnss-daemon + (gate)
+    # arranque del modem tras el MCU slate. Ver la cabecera de dace-wlan.sh.
+    install -m 0755 ${UNPACKDIR}/dace-wlan.sh \
+        ${D}${libexecdir}/dace-wlan.sh
+    install -m 0644 ${UNPACKDIR}/dace-wlan.service \
+        ${D}${systemd_unitdir}/system/dace-wlan.service
     # Alimentacion del chip de BT via /dev/btpower (BT_CMD_PWR_CTRL): con
     # soc=slate el HAL no vota reguladores y los rieles l13/l17 se quedaban
     # apagados -> chip mudo.
@@ -149,15 +157,17 @@ do_install() {
 do_package_qa() {
 }
 
-SYSTEMD_SERVICE:${PN} = "dace-lxc-android.service dace-lxc-hal-start.service dace-slate-mcu.service var-lib-lxc-android-rootfs.mount"
+SYSTEMD_SERVICE:${PN} = "dace-lxc-android.service dace-lxc-hal-start.service dace-slate-mcu.service dace-wlan.service var-lib-lxc-android-rootfs.mount"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 FILES:${PN} = "${localstatedir}/lib/lxc/android \
                ${libexecdir}/dace-lxc-android-start.sh \
                ${libexecdir}/dace-lxc-hal-start.sh \
                ${libexecdir}/dace-slate-mcu.sh \
+               ${libexecdir}/dace-wlan.sh \
                ${libexecdir}/dace-bt-power.pl \
                ${systemd_unitdir}/system/dace-lxc-hal-start.service \
                ${systemd_unitdir}/system/dace-slate-mcu.service \
+               ${systemd_unitdir}/system/dace-wlan.service \
                ${systemd_unitdir}/system/dace-lxc-android.service \
                ${systemd_unitdir}/system/var-lib-lxc-android-rootfs.mount \
                ${systemd_unitdir}/system/bluebinder.service.d/bluebinder-dace.conf \

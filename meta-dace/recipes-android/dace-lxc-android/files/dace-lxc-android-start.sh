@@ -367,6 +367,25 @@ if [ -d "$ROOTFS/data" ] && ! mountpoint -q "$ROOTFS/data"; then
     fi
 fi
 
+# WLAN: /data/vendor/wifi/sockets ANTES de lanzar el init de Android.
+# cnss-daemon (class late_start, init.qcom.rc) bindea ahi su "user socket";
+# sin el muere con "Fail to bind user socket" y el puente cnss-genl del WLAN
+# nunca sube. El init de Android NO lo crea (su post-fs-data hace
+# `mkdir /data/vendor` con encryption=Require y en un /data tmpfs plano sin FBE
+# falla). Lo creamos en el namespace del host: el tmpfs de /data ya esta
+# montado en $ROOTFS/data y el contenedor lo hereda, asi que init y
+# cnss-daemon lo ven. Patron de aurora (que tambien monta /data como tmpfs).
+if mountpoint -q "$ROOTFS/data"; then
+    mkdir -p "$ROOTFS/data/vendor/wifi/sockets" \
+             "$ROOTFS/data/vendor/wifi/wpa/sockets" 2>/dev/null
+    chown 1000:1000 "$ROOTFS/data/vendor" \
+                    "$ROOTFS/data/vendor/wifi" \
+                    "$ROOTFS/data/vendor/wifi/sockets" 2>/dev/null
+    chmod 0771 "$ROOTFS/data/vendor" "$ROOTFS/data/vendor/wifi" 2>/dev/null
+    chmod 0770 "$ROOTFS/data/vendor/wifi/sockets" 2>/dev/null
+    echo "dace-lxc-android: preparado /data/vendor/wifi/sockets (WLAN)"
+fi
+
 # /mnt tmpfs + bind /persist into /mnt/vendor/persist
 if ! mountpoint -q $ROOTFS/mnt; then
     mount -t tmpfs android_mnt $ROOTFS/mnt
