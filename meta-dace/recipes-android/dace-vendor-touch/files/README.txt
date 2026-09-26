@@ -1,22 +1,22 @@
-Modulos stock del vendor (Mobvoi msm-5.15 g7f9d6c16b5cd) PARCHEADOS para
-nuestro kernel (dace). Origen: ota-stock/extracted/modules-stripped/*.ko
-(ya sin la seccion __versions -> cargan con taint forzado).
+Stock vendor modules (Mobvoi msm-5.15 g7f9d6c16b5cd) PATCHED for our kernel
+(dace). Origin: ota-stock/extracted/modules-stripped/*.ko
+(already without the __versions section -> they load with forced taint).
 
-PARCHES APLICADOS (ver patch-stock-module.py en la raiz del repo):
-1. SCS (shadow call stack): los .ko stock guardan x30 via x18
-   (str x30,[x18],#8 / ldr x30,[x18,#-8]!). Nuestro kernel NO tiene
-   CONFIG_SHADOW_CALL_STACK (sw5100.fragment lo pide pero Kconfig lo
-   descarta), asi que x18 es basura y esas escrituras corrompen memoria ->
-   el rootfs arrancaba, petaba y volvia al modo seguro. Se NOPean las
-   parejas push/pop en .text/.init.text/.exit.text.
-2. Reloc de exit en .gnu.linkonce.this_module: 0x378 (stock) -> 0x3a8
-   (nuestro kernel). El de init NO se toca: nuestro layout lo pone en
-   0x178, igual que el stock (gracias al slot ABI
-   dace-module-cfi-abi-slot.patch). Solo afecta al rmmod.
+PATCHES APPLIED (see patch-stock-module.py in the repo root):
+1. SCS (shadow call stack): the stock .ko's save x30 via x18
+   (str x30,[x18],#8 / ldr x30,[x18,#-8]!). Our kernel does NOT have
+   CONFIG_SHADOW_CALL_STACK (sw5100.fragment asks for it but Kconfig
+   discards it), so x18 is garbage and those writes corrupt memory ->
+   the rootfs booted, crashed and went back to safe mode. The push/pop
+   pairs are NOPed in .text/.init.text/.exit.text.
+2. exit reloc in .gnu.linkonce.this_module: 0x378 (stock) -> 0x3a8
+   (our kernel). The init one is NOT touched: our layout puts it at
+   0x178, same as stock (thanks to the ABI slot
+   dace-module-cfi-abi-slot.patch). It only affects rmmod.
 
-Regenerar:
+Regenerate:
   python3 patch-stock-module.py <in.ko> <out.ko>
-  (por defecto: init 0x178->0x178, exit 0x378->0x3a8, NOP SCS)
-Si el layout de struct module cambia (medirlo compilando un modulo de prueba
-contra el build dir y volcando los relocs de this_module), pasar los offsets
-nuevos como 3er/4o argumento.
+  (by default: init 0x178->0x178, exit 0x378->0x3a8, NOP SCS)
+If the struct module layout changes (measure it by building a test module
+against the build dir and dumping the this_module relocs), pass the new
+offsets as the 3rd/4th argument.

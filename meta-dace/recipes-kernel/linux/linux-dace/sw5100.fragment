@@ -1,3 +1,4 @@
+# AI Assisted:
 CONFIG_GOOGLE_VOTABLE=m
 CONFIG_GOOGLE_LOGBUFFER=m
 CONFIG_I2C_CHARDEV=m
@@ -20,11 +21,11 @@ CONFIG_DUMMY_CONSOLE=y
 CONFIG_LDISC_AUTOLOAD=y
 
 # Kernel-owned USB debug channel.
-# g_serial (=y) registra su gadget y RECLAMA la UDC al boot: el configfs adb
-# encuentra la UDC ocupada ("couldn't find an available UDC") y no sale al
-# bus como 18d1:d002. Para adb lo desactivamos: el gadget adb (configfs/ffs)
-# tomará la UDC. La consola ttyGS0 vuelve después vía función acm del
-# configfs o vía adb shell.
+# g_serial (=y) registers its gadget and CLAIMS the UDC at boot: the configfs
+# adb finds the UDC busy ("couldn't find an available UDC") and does not go out
+# to the bus as 18d1:d002. For adb we disable it: the adb gadget (configfs/ffs)
+# will take the UDC. The ttyGS0 console comes back later via the configfs acm
+# function or via adb shell.
 # CONFIG_USB_G_SERIAL is not set
 CONFIG_U_SERIAL_CONSOLE=y
 
@@ -74,17 +75,17 @@ CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,integrity,apparmor,selinux,
 # CONFIG_QCOM_POWER_SUPPLY is not set
 # CONFIG_QPNP_SMBLITE is not set
 # CONFIG_QTI_QBG is not set
-# ─── SLATE (coprocesador de Mobvoi) ─────────────────────────────────────────
-# Estaban desactivados del bring-up. Se activan como MODULOS (=m) porque el
-# overlay de NUESTRA variante (Monaco IDP V1.0) crea sus nodos DT
+# ─── SLATE (Mobvoi coprocessor) ─────────────────────────────────────────────
+# They were disabled during bring-up. They are enabled as MODULES (=m) because
+# the overlay of OUR variant (Monaco IDP V1.0) creates their DT nodes
 # (slate-spi, slate-daemon, slatecom-rpmsg, slate-events-bridge, slate-rsb,
-# slate-mobvoirpc, slatetouch-rpmsg) y porque:
-#   * el driver del tactil del VENDOR depende de slate_mobvoi_rpc y
-#     slate_events_bridge (y el canal 'slatetouch-rpmsg' existe en el DT),
-#   * MSM_SEB dice literalmente que recibe los EVENTOS DE BOTONES del slate
-#     (el boton/rueda que no funciona),
-# asi que es muy probable que el slate alimente/habilite el tactil y gestione
-# las teclas. =m (no =y) para poder cargarlos a mano y ver el efecto.
+# slate-mobvoirpc, slatetouch-rpmsg) and because:
+#   * the VENDOR touch driver depends on slate_mobvoi_rpc and
+#     slate_events_bridge (and the 'slatetouch-rpmsg' channel exists in the DT),
+#   * MSM_SEB literally says it receives the slate BUTTON EVENTS
+#     (the button/wheel that does not work),
+# so it is very likely that the slate powers/enables the touch and manages the
+# keys. =m (not =y) so they can be loaded by hand and the effect observed.
 CONFIG_MSM_SEB=m
 CONFIG_MSM_SEB_RPMSG=m
 CONFIG_MSM_SLATECOM=m
@@ -124,67 +125,69 @@ CONFIG_FB_QCOM_CONT_SPLASH=y
 # this off, /dev/vhci doesn't exist and bluebinder has nowhere to write.
 CONFIG_BT_HCIVHCI=m
 
-# ─── Watchdog interno (bring-up dace) ───
-# CONFIG_WATCHDOG_CORE=y + CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED=y hacen que el
-# kernel se reinicie si el boot no "completa" (cadena clk/regulador USB). En
-# el dace con la cadena incompleta, el WDT mata el kernel a los ~8-15s tras
-# cargar los modulos (init vivo -> negro -> EDL). Para el bring-up los
-# desactivamos: el kernel debe quedarse vivo aunque la cadena USB no complete.
-# (El watch del ABL no se toca; esto es el WDT interno del kernel Qualcomm.)
+# ─── Internal watchdog (dace bring-up) ───
+# CONFIG_WATCHDOG_CORE=y + CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED=y make the
+# kernel reboot if the boot does not "complete" (USB clk/regulator chain). On
+# dace with the incomplete chain, the WDT kills the kernel at ~8-15s after
+# loading the modules (init alive -> black -> EDL). For bring-up we disable
+# them: the kernel must stay alive even if the USB chain does not complete.
+# (The ABL watch is not touched; this is Qualcomm's internal kernel WDT.)
 # CONFIG_WATCHDOG_CORE is not set
 # CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED is not set
 
-# ─── STACKPROTECTOR: compat con módulos vendor stock ───
-# Los .ko prebuilt del vendor_boot stock (Mobvoi) se compilaron con
-# STACKPROTECTOR_STRONG y necesitan __stack_chk_fail exportado (solo con
-# CONFIG_STACKPROTECTOR=y). Los otros símbolos CFI faltantes
-# (__cfi_slowpath_diag, __ubsan_handle_cfi_check_fail_abort) los cubre
+# ─── STACKPROTECTOR: compatibility with stock vendor modules ───
+# The prebuilt .ko's from the stock vendor_boot (Mobvoi) were built with
+# STACKPROTECTOR_STRONG and need __stack_chk_fail exported (only with
+# CONFIG_STACKPROTECTOR=y). The other missing CFI symbols
+# (__cfi_slowpath_diag, __ubsan_handle_cfi_check_fail_abort) are covered by
 # dace-stock-stubs.patch.
 CONFIG_STACKPROTECTOR=y
 CONFIG_STACKPROTECTOR_STRONG=y
 
-# ─── WQ_WATCHDOG (workqueue watchdog del charger smblite) ───
-# CONFIG_WQ_WATCHDOG=y panicea el kernel si la workqueue del charger
-# (qpnp-smblite) se queda congelada esperando VDD_CX (que no llega en el
-# dace porque la cadena RPM no completa). Es el disparador del panic a los
-# ~8-15s (init vivo -> reboot). Off para el bring-up.
+# ─── WQ_WATCHDOG (smblite charger workqueue watchdog) ───
+# CONFIG_WQ_WATCHDOG=y panics the kernel if the charger workqueue
+# (qpnp-smblite) freezes waiting for VDD_CX (which does not arrive on dace
+# because the RPM chain does not complete). It is the trigger of the panic at
+# ~8-15s (init alive -> reboot). Off for bring-up.
 # CONFIG_WQ_WATCHDOG is not set
 # CONFIG_QCOM_SOC_WATCHDOG is not set
 
-# ── TACTIL: driver del VENDOR Zinitix (bt541_ts_device, zinitix-i2c.ko) ────
-# EL TACTIL FUNCIONA con el driver del VENDOR (ver AGENTS.md §5). Nuestro
-# zinitix.ko mainline se QUITA (=n): se queda con 1-0020 y bloquearia el probe
-# del vendor (solo un driver puede bindear). El vendor se instala con la
-# receta dace-vendor-touch y se carga desde dace-lxc-hal-start.sh tras los HAL.
+# ── TOUCH: VENDOR Zinitix driver (bt541_ts_device, zinitix-i2c.ko) ────
+# THE TOUCH WORKS with the VENDOR driver. Our mainline
+# zinitix.ko is REMOVED (=n): it would hold 1-0020 and block the vendor probe
+# (only one driver can bind). The vendor driver is installed by the
+# dace-vendor-touch recipe and loaded from dace-lxc-hal-start.sh after the HALs.
 # CONFIG_TOUCHSCREEN_ZINITIX is not set
-# ── TÁCTIL REAL: RAYDIUM RM32380 (i2c-1 @0x39) ───────────────────────────────
-# El Zinitix de arriba es boilerplate de Samsung (no hay chip). El táctil real
-# del T5 es un Raydium y el driver ya está en el árbol (mainline).
+# ── REAL TOUCH: RAYDIUM RM32380 (i2c-1 @0x39) ────────────────────────────────
+# The Zinitix above is Samsung boilerplate (there is no chip). The real T5
+# touch panel is a Raydium and the driver is already in the tree (mainline).
 CONFIG_TOUCHSCREEN_RM_TS=m
 
-# ── SHADOW CALL STACK (compat con .ko vendor stock) ──────────────────────────
-# Los .ko stock (Mobvoi msm-5.15 g7f9d6c16b5cd) se compilaron con SCS: guardan
-# x30 vía x18 (str x30,[x18],#8).
-# OJO: esta linea NO surte efecto (comprobado 15-09-2026: el .config final no
-# tiene CONFIG_SHADOW_CALL_STACK y un modulo nuestro recien compilado sale con
-# 0 instrucciones SCS; el Kconfig la descarta en esta configuracion). Por eso
-# los .ko del vendor se NOPean en la receta dace-vendor-touch (ver su
-# files/README.txt y patch-stock-module.py). Se deja la linea por si algun dia
-# se puede activar: entonces habria que bakear los .ko SIN parchear.
+# ── SHADOW CALL STACK (compatibility with stock vendor .ko's) ────────────────
+# The stock .ko's (Mobvoi msm-5.15 g7f9d6c16b5cd) were built with SCS: they
+# save x30 via x18 (str x30,[x18],#8).
+# NOTE: this line does NOT take effect (verified 2026-09-15: the final .config
+# does not have CONFIG_SHADOW_CALL_STACK and a freshly built module of ours
+# comes out with 0 SCS instructions; Kconfig discards it in this
+# configuration). That is why the vendor .ko's are NOPed in the
+# dace-vendor-touch recipe (see its files/README.txt and patch-stock-module.py).
+# The line is kept in case it can be enabled some day: then the .ko's would
+# have to be baked WITHOUT patching.
 CONFIG_SHADOW_CALL_STACK=y
 
-# ── GESTIÓN DE ENERGÍA: autosleep para MCE (23-09-2026) ──────────────────────
-# MEDIDO: el reloj NO suspende nunca (`/sys/power/suspend_stats/success` = 0 tras
-# 21 h de uptime). Causa raíz: MCE (mce/libwakelock.c:lwl_probe()) busca un
-# modelo de suspend soportado y no encuentra ninguno:
-#   * `echo on > /sys/power/state` -> EINVAL (early-suspend no existe en 5.15)
-#   * /sys/power/autosleep NO existe (CONFIG_PM_AUTOSLEEP off, igual que el
-#     stock de Mobvoi y que aurora) -> lwl_probe() devuelve SUSPEND_TYPE_NONE
-#   * resultado: mdy_stm_start_fb_suspend() no escribe NADA y el SoC se queda
-#     en WFI/C3 para siempre (mce_mux se re-activa ~1/1.9 s, 40 617 veces).
-# En stock Android el suspend lo dispara el framework (PowerManager escribe
-# "mem" en /sys/power/state); en AsteroidOS no hay framework -> el mecanismo
-# nativo es el autosleep de MCE/Sailfish (writes "mem" en autosleep al apagar
-# el framebuffer). Con PM_AUTOSLEEP=y, lwl_probe() devuelve SUSPEND_TYPE_AUTO y
-# MCE vuelve a suspender. Es el ÚNICO cambio de kernel que pide la energía.
+# ── POWER MANAGEMENT: autosleep for MCE (2026-09-23) ─────────────────────────
+# MEASURED: the watch NEVER suspends (`/sys/power/suspend_stats/success` = 0
+# after 21 h of uptime). Root cause: MCE (mce/libwakelock.c:lwl_probe()) looks
+# for a supported suspend model and finds none:
+#   * `echo on > /sys/power/state` -> EINVAL (early-suspend does not exist in 5.15)
+#   * /sys/power/autosleep does NOT exist (CONFIG_PM_AUTOSLEEP off, same as the
+#     Mobvoi stock and aurora) -> lwl_probe() returns SUSPEND_TYPE_NONE
+#   * result: mdy_stm_start_fb_suspend() writes NOTHING and the SoC stays in
+#     WFI/C3 forever (mce_mux re-activates ~1/1.9 s, 40 617 times).
+# In stock Android suspend is triggered by the framework (PowerManager writes
+# "mem" to /sys/power/state); on AsteroidOS there is no framework -> the native
+# mechanism is MCE/Sailfish autosleep (writes "mem" to autosleep when the
+# framebuffer turns off). With PM_AUTOSLEEP=y, lwl_probe() returns
+# SUSPEND_TYPE_AUTO and MCE suspends again. It is the ONLY kernel change that
+# power management requires.
 CONFIG_PM_AUTOSLEEP=y

@@ -1,9 +1,9 @@
-SUMMARY = "dace: fijar el SDP current del USB para que el smblite cargue"
-DESCRIPTION = "El smblite arranca con el usb_icl_votable a ~2 mA, asi que en un \
-puerto SDP (PC) la entrada queda suspendida y el reloj no carga. El driver USB \
-de Android fija ese limite via POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT; aqui no \
-hay framework Android, asi que un servicio + una regla udev escriben 500 mA en \
-usb/input_current_limit cuando el USB esta presente y online=0."
+SUMMARY = "dace: set the USB SDP current so smblite charges"
+DESCRIPTION = "smblite starts with usb_icl_votable at ~2 mA, so on an SDP port \
+(PC) the input is left suspended and the watch does not charge. The Android USB \
+driver sets that limit via POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT; there is no \
+Android framework here, so a service + a udev rule write 500 mA to \
+usb/input_current_limit when USB is present and online=0."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 COMPATIBLE_MACHINE = "dace"

@@ -20,9 +20,9 @@ secure_buffer.ko
 mem_buf.ko
 mem_buf_dev.ko
 socinfo.ko
-# qcom_wdt_core.ko — WDT core del kernel (módulo, CONFIG_WQ_WATCHDOG=y).
-# Re-activa el watchdog que mata el kernel por 'boot no completo' en el dace
-# (init vivo P24 -> negro -> EDL a los ~10-15s). Comentamos para el bring-up.
+# qcom_wdt_core.ko — kernel WDT core (module, CONFIG_WQ_WATCHDOG=y).
+# It re-enables the watchdog that kills the kernel on 'boot not complete' on dace
+# (init alive P24 -> black -> EDL at ~10-15s). Commented out for bring-up.
 # qcom_wdt_core.ko
 # qcom_soc_wdt.ko
 eud.ko
@@ -89,16 +89,16 @@ qcom_smd.ko
 qcom-spmi-adc5-gen3.ko
 qcom-vadc-common.ko
 nvmem_qcom-spmi-sdam.ko
-# qnoc-monaco: IMPRESCINDIBLE y AHORA SI (estuvo blacklisted durante el
-# bring-up). Es el proveedor ICC del que dependen msm_drm (qcom,sde-reg-bus) y
-# el apps-smmu (via interconnects). Tiene que cargarse ANTES que msm_drm:
-# msm_smmu_probe() (driver de smmu_sde_unsec_cb, dentro de msm_drm.ko) hace
-# iommu_get_domain_for_dev() y si no hay dominio devuelve -EINVAL -¡no
-# -EPROBE_DEFER!-, asi que si el apps-smmu aun no esta, el componente nunca se
-# añade y msm_drm_bind() no crea /dev/dri (sin display).
-# El reset duro a EDL que obligo a quitarlo esta resuelto: arm-smmu honra
-# qcom,skip-init (arm-smmu-skip-init.patch) y ademas marca la tabla SMR/S2CR
-# del firmware como en uso (si no se marcaba, Linux pisaba la del eMMC ->
+# qnoc-monaco: ESSENTIAL and NOW INCLUDED (it was blacklisted during
+# bring-up). It is the ICC provider that msm_drm (qcom,sde-reg-bus) and the
+# apps-smmu (via interconnects) depend on. It must be loaded BEFORE msm_drm:
+# msm_smmu_probe() (driver of smmu_sde_unsec_cb, inside msm_drm.ko) calls
+# iommu_get_domain_for_dev() and if there is no domain it returns -EINVAL -NOT
+# -EPROBE_DEFER!-, so if the apps-smmu is not up yet, the component is never
+# added and msm_drm_bind() does not create /dev/dri (no display).
+# The hard reset to EDL that forced its removal is solved: arm-smmu honors
+# qcom,skip-init (arm-smmu-skip-init.patch) and also marks the firmware SMR/S2CR
+# table as in use (if it was not marked, Linux overwrote the eMMC one ->
 # 'mmc0: ADMA error' -> EDL).
 qnoc-monaco.ko
 icc-rpm.ko
@@ -116,14 +116,14 @@ smcinvoke_dlkm.ko
 google-extcon-usb-shim.ko
 gvotable.ko
 logbuffer.ko
-# ── VIA1: cadena charger/BMS mínima (carga escalonada desde init.sh) ──
-# El culpable del hang era la cadena google-* (fuel gauges aurora que no
-# existen en el T5). Dejamos que init.sh los cargue escalonados (STAGE n)
-# para verificar:  qti-qbg-main (STOCK mobvoi, provider IIO del charger)
-# → qpnp-smblite-main (build aurora, charger). gvotable/logbuffer (deps)
-# ya van arriba en el modprobe normal.
-# NO se cargan aquí en el modprobe masivo (los carga la ventana STAGE del init).
-# google-bms/battery/charger/sw5100_bms: aurora-only, cuelgan en T5 → fuera.
+# ── VIA1: minimal charger/BMS chain (staged load from init.sh) ──
+# The culprit of the hang was the google-* chain (aurora fuel gauges that do
+# not exist on the T5). We let init.sh load them in stages (STAGE n) to verify:
+#   qti-qbg-main (STOCK mobvoi, charger IIO provider)
+# → qpnp-smblite-main (aurora build, charger). gvotable/logbuffer (deps)
+# already go above in the normal modprobe.
+# They are NOT loaded here in the bulk modprobe (the init STAGE window loads them).
+# google-bms/battery/charger/sw5100_bms: aurora-only, hang on T5 → out.
 # qpnp-smblite-main.ko
 # qti-qbg-main.ko
 nanohub.ko
@@ -132,4 +132,4 @@ cl_dsp.ko
 cl_dsp-debugfs.ko
 input-cs40l26-i2c.ko
 snd-soc-cs40l26.ko
-# (qnoc-monaco ya se carga arriba, antes de msm_drm)
+# (qnoc-monaco is already loaded above, before msm_drm)

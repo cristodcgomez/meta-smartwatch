@@ -1,3 +1,4 @@
+# AI Assisted:
 require recipes-kernel/linux/linux.inc
 
 SUMMARY = "Pixel Watch 2 (dace) kernel — UBPorts/Halium google-eos 5.15"
@@ -6,13 +7,14 @@ LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=6bc538ed5bd9a7fc9398086aedcd7e46"
 COMPATIBLE_MACHINE = "dace"
 
-# --- PLAN-CAUSA-RAIZ Paso C: voto ICC real ---
-# Con DACE_ICC_REALVOTE=1 (DEFAULT desde 16-09-2026, medido seguro en vivo)
-# se aplica icc-rpm-realvote.patch, que revierte el stub icc-rpm-novote.patch y
-# hace que el qnoc-monaco vote de verdad al RPM (msm_rpm_send_message, la MISMA
-# via que clk-smd-rpm y que el vendor real de monaco). El stub era OBSOLETO:
-# el reset original era el re-init del apps-smmu (arm-smmu-skip-init). Ver
-# PLAN-CAUSA-RAIZ Paso C. Con DACE_ICC_REALVOTE=0 se vuelve al stub (fallback).
+# --- Real ICC vote ---
+# With DACE_ICC_REALVOTE=1 (DEFAULT since 2026-09-16, measured safe live)
+# icc-rpm-realvote.patch is applied, which reverts the icc-rpm-novote.patch stub
+# and makes qnoc-monaco actually vote to the RPM (msm_rpm_send_message, the SAME
+# path as clk-smd-rpm and the real monaco vendor). The stub was OBSOLETE:
+# the original reset was the apps-smmu re-init (arm-smmu-skip-init). See
+# With DACE_ICC_REALVOTE=0 it goes back to the stub
+# (fallback).
 DACE_ICC_REALVOTE ?= "1"
 
 # Pixel Watch 2 (dace) kernel: the UBPorts/Halium kernel-for-google-eos tree,
@@ -73,9 +75,9 @@ KERNEL_IMAGETYPE = "Image"
 # wire native libelf/pahole for resolve_btfids; BTF is BPF-CO-RE/debug,
 # boot-irrelevant).
 do_configure:prepend() {
-    # Telemetría de arranque: ROJO=start_kernel, AZUL=do_basic_setup,
-    # AMARILLO=kernel_init. sysfs /sys/kernel/dace_{color,barcode,text} para
-    # userspace. (mismo dace-bootcolor.py que la receta ticwatch)
+    # Boot telemetry: RED=start_kernel, BLUE=do_basic_setup,
+    # YELLOW=kernel_init. sysfs /sys/kernel/dace_{color,barcode,text} for
+    # userspace. (same dace-bootcolor.py as the ticwatch recipe)
     python3 ${UNPACKDIR}/dace-bootcolor.py ${S}/init/main.c \
         ${S}/drivers/soc/qcom/slatecom_interface.c 2>/dev/null || true
     sh ${S}/scripts/kconfig/merge_config.sh -m -r -O ${WORKDIR} \
@@ -95,9 +97,9 @@ do_configure:prepend() {
     echo "# CONFIG_LTO_CLANG is not set" >> ${WORKDIR}/defconfig
     echo "CONFIG_LTO_NONE=y" >> ${WORKDIR}/defconfig
     echo "# CONFIG_CFI_CLANG is not set" >> ${WORKDIR}/defconfig
-    # Aceptar los 260 .ko pre-built del vendor_boot STOCK (Mobvoi msm-5.15,
-    # sin seccion __versions): el kernel dace no conoce sus CRCs/ABI. Igual
-    # que la receta ticwatch (t5-critical.fragment).
+    # Accept the 260 pre-built .ko's from the STOCK vendor_boot (Mobvoi
+    # msm-5.15, without a __versions section): the dace kernel does not know
+    # their CRCs/ABI. Same as the ticwatch recipe (t5-critical.fragment).
     echo "CONFIG_MODULE_FORCE_LOAD=y" >> ${WORKDIR}/defconfig
     # Keep the SoC/vendor drivers =m; do not fold them into vmlinux. Qualcomm
     # vendor drivers resolve many symbols only at module-load (e.g.
@@ -127,9 +129,10 @@ KERNEL_OBJCOPY = "${LLVM_BIN}/llvm-objcopy"
 KERNEL_OBJDUMP = "${LLVM_BIN}/llvm-objdump"
 KERNEL_STRIP = "${LLVM_BIN}/llvm-strip"
 EXTRA_OEMAKE:append = " LLVM=1 LLVM_IAS=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-"
-# Alinear el vermagic con el de los módulos STOCK Mobvoi del vendor_boot
-# (5.15.144-g7f9d6c16b5cd-ab151). Sin esto, los 260 .ko del vendor_boot T5
-# no cargan en este kernel (mismatch de vermagic) y no hay UDC/usb.
+# Align the vermagic with that of the STOCK Mobvoi modules from the vendor_boot
+# (5.15.144-g7f9d6c16b5cd-ab151). Without this, the 260 .ko's from the T5
+# vendor_boot do not load in this kernel (vermagic mismatch) and there is no
+# UDC/usb.
 EXTRA_OEMAKE:append = " EXTRAVERSION=-g7f9d6c16b5cd-ab151"
 # clang-15..20 promoted a family of C89-isms from warning to DEFAULT-ERROR
 # (independent of -Werror): -Wimplicit-int, -Wint-conversion,

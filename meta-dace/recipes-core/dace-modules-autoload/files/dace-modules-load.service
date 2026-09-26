@@ -1,5 +1,5 @@
 [Unit]
-Description=dace: carga explicita de la cadena vendor (WLAN/BT/ASoC)
+Description=dace: explicit load of the vendor chain (WLAN/BT/ASoC)
 Documentation=file:/etc/modules-load.d/dace-post-rootfs.conf
 DefaultDependencies=no
 After=local-fs.target systemd-modules-load.service

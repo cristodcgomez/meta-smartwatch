@@ -1,13 +1,13 @@
 From: TicWatch Pro 5 port
 Subject: [PATCH] usb: dwc3: core: trace probe steps via /sys/kernel/dace_core
 
-Expone el paso exacto del probe del core dwc3 (built-in) en
-/sys/kernel/dace_core (paso + errno; bit 0x40 = salio por error) para
-localizar el bloqueo D0 sin UART: 1=entry 2=ioremap 3=clk 4=is_valid
+Exposes the exact probe step of the dwc3 core (built-in) at
+/sys/kernel/dace_core (step + errno; bit 0x40 = exited through error) to locate
+the D0 block without a UART: 1=entry 2=ioremap 3=clk 4=is_valid
 5=drvdata 6=core_init 7=get_phy 8=phy_init 9=soft_reset 10=core_init ok
-11=core_init_mode 12=gadget_init ok 13=success. Declaraciones al inicio
-del fichero (los usos aparecen en dwc3_core_init antes de dwc3_probe).
-Sin cambios funcionales.
+11=core_init_mode 12=gadget_init ok 13=success. Declarations at the start of
+the file (uses appear in dwc3_core_init before dwc3_probe).
+No functional changes.
 
 Upstream-Status: Inappropriate [dace bring-up]
 ---
@@ -20,7 +20,7 @@ Upstream-Status: Inappropriate [dace bring-up]
 +
 +#include <linux/sysfs.h>
 +#include <linux/kobject.h>
-+/* dace trace: paso del probe del core dwc3 (0 = probe nunca llamado) */
++/* dace trace: dwc3 core probe step (0 = probe never called) */
 +volatile int dace_core_step;
 +int dace_core_ret;
 +static ssize_t dace_core_show(struct kobject *k, struct kobj_attribute *a,

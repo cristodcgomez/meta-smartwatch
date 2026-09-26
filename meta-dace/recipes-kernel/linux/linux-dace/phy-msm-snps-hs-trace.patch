@@ -1,7 +1,7 @@
 From: TicWatch Pro 5 port
-Subject: [PATCH] usb: phy: phy-msm-snps-hs: eud tolerante + traza fina (dace)
+Subject: [PATCH] usb: phy: phy-msm-snps-hs: tolerant eud + fine trace (dace)
 
-Instrumentación de bring-up del probe de la phy HS (pasos 11..43).
+HS phy probe bring-up instrumentation (steps 11..43).
 Upstream-Status: Inappropriate [dace bring-up]
 ---
 diff --git a/drivers/usb/phy/phy-msm-snps-hs.c b/drivers/usb/phy/phy-msm-snps-hs.c
@@ -12,7 +12,7 @@ index 2b55f17e5..8610a8f60 100644
  		return 0;
  	}
  
-+	/* dace B: sin control de LDOs -> el bootloader los dejo on */
++	/* dace B: no LDO control -> the bootloader left them on */
 +	if (!phy->vdd && !phy->vdda18 && !phy->vdda33)
 +		return 0;
 +
@@ -23,7 +23,7 @@ index 2b55f17e5..8610a8f60 100644
  	debugfs_create_x8("param_ovrd3", 0644, phy->root, &phy->param_ovrd3);
  }
  
-+/* dace traza PHY HS (opcion1): paso del probe */
++/* dace HS PHY trace (option1): probe step */
 +static volatile int dace_phy_step = 0;
 +#include <linux/sysfs.h>
 +#include <linux/kobject.h>
@@ -70,12 +70,12 @@ index 2b55f17e5..8610a8f60 100644
  			"eud_enable_reg");
  	if (res) {
 -		phy->eud_enable_reg = devm_ioremap_resource(dev, res);
-+		/* dace: el EUD reserva 0x1612000; ioremap plano y tolerante */
++		/* dace: EUD reserves 0x1612000; plain, tolerant ioremap */
 +		phy->eud_enable_reg = devm_ioremap(dev, res->start, resource_size(res));
  		if (IS_ERR(phy->eud_enable_reg)) {
 -			dev_err(dev, "err getting eud_enable_reg address\n");
 -			return PTR_ERR(phy->eud_enable_reg);
-+			dev_dbg(dev, "eud_enable_reg no disponible (bootloader on)");
++			dev_dbg(dev, "eud_enable_reg not available (bootloader on)");
 +			phy->eud_enable_reg = NULL;
  		}
  		phy->eud_reg = res->start;
@@ -97,33 +97,33 @@ index 2b55f17e5..8610a8f60 100644
  	}
  
  
-+	/* dace B: LDO opcional (bootloader deja on) */
++	/* dace B: optional LDO (bootloader leaves on) */
  	phy->vdd = devm_regulator_get(dev, "vdd");
  	if (IS_ERR(phy->vdd)) {
 -		dev_err(dev, "unable to get vdd supply\n");
 -		ret = PTR_ERR(phy->vdd);
 -		goto err_ret;
-+		dev_dbg(dev, "vdd no disponible (bootloader on)");
++		dev_dbg(dev, "vdd not available (bootloader on)");
 +		phy->vdd = NULL;
  	}
  
-+	/* dace B: LDO opcional (bootloader deja on) */
++	/* dace B: optional LDO (bootloader leaves on) */
  	phy->vdda33 = devm_regulator_get(dev, "vdda33");
  	if (IS_ERR(phy->vdda33)) {
 -		dev_err(dev, "unable to get vdda33 supply\n");
 -		ret = PTR_ERR(phy->vdda33);
 -		goto err_ret;
-+		dev_dbg(dev, "vdda33 no disponible (bootloader on)");
++		dev_dbg(dev, "vdda33 not available (bootloader on)");
 +		phy->vdda33 = NULL;
  	}
  
-+	/* dace B: LDO opcional (bootloader deja on) */
++	/* dace B: optional LDO (bootloader leaves on) */
  	phy->vdda18 = devm_regulator_get(dev, "vdda18");
  	if (IS_ERR(phy->vdda18)) {
 -		dev_err(dev, "unable to get vdda18 supply\n");
 -		ret = PTR_ERR(phy->vdda18);
 -		goto err_ret;
-+		dev_dbg(dev, "vdda18 no disponible (bootloader on)");
++		dev_dbg(dev, "vdda18 not available (bootloader on)");
 +		phy->vdda18 = NULL;
  	}
  
@@ -144,7 +144,7 @@ index 2b55f17e5..8610a8f60 100644
  		return ret;
  	}
  
-+	dace_phy_step = 42; /* tras regulator_init */
++	dace_phy_step = 42; /* after regulator_init */
  	INIT_WORK(&phy->vbus_draw_work, msm_hsphy_vbus_draw_work);
  	msm_hsphy_create_debugfs(phy);
  
@@ -153,11 +153,11 @@ index 2b55f17e5..8610a8f60 100644
  	if (phy->eud_enable_reg && readl_relaxed(phy->eud_enable_reg))
  		msm_hsphy_enable_power(phy, true);
 +	dace_phy_step = 43; /* return 0 */
-+	/* dace: forzar cable conectado (EUD_SPOOF_CONNECT) ya que el charger
-+	 * (fuente de VBUS) no está; sin esto el dwc3-msm nunca arma el path de
-+	 * connect y el host no enumera aunque la UDC exista. */
++	/* dace: force cable connected (EUD_SPOOF_CONNECT) since the charger (the
++	 * VBUS source) is not there; without this dwc3-msm never arms the connect
++	 * path and the host does not enumerate even though the UDC exists. */
 +	phy->phy.flags |= EUD_SPOOF_CONNECT;
-+	dev_info(phy->phy.dev, "dace: EUD_SPOOF_CONNECT forzado (sin VBUS)\n");
++	dev_info(phy->phy.dev, "dace: EUD_SPOOF_CONNECT forced (no VBUS)\n");
  	return 0;
  
  err_ret:

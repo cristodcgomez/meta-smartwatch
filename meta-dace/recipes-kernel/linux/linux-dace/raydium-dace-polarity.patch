@@ -1,18 +1,19 @@
 From: TicWatch Pro 5 (dace) port
-Subject: [PATCH] input: raydium_i2c_ts: alimentar SIEMPRE + autodetectar polaridad del reset
+Subject: [PATCH] input: raydium_i2c_ts: ALWAYS power up + autodetect reset polarity
 
-Dos cosas para el T5 (Raydium RM32380 en i2c-1 @0x39):
+Two things for the T5 (Raydium RM32380 on i2c-1 @0x39):
 
-1) El upstream sale de raydium_i2c_power_on() sin encender los reguladores si
-   el nodo no trae GPIO de reset ("if (!ts->reset_gpio) return 0"), dando por
-   hecho que los rieles ya estan encendidos. En el T5 el riel analogico
-   (L29A/vdd_ana, 2.8V) NO lo usa nadie mas -> se queda apagado y el chip no
-   contesta a i2c ("nothing at this address"). Aqui se encienden SIEMPRE.
+1) Upstream returns from raydium_i2c_power_on() without turning on the
+   regulators if the node has no reset GPIO ("if (!ts->reset_gpio) return 0"),
+   assuming the rails are already on. On the T5 the analog rail
+   (L29A/vdd_ana, 2.8V) is not used by anyone else -> it stays off and the chip
+   does not answer i2c ("nothing at this address"). Here they are ALWAYS turned
+   on.
 
-2) El driver termina el power_on dejando el reset en el nivel LOGICO 0; segun
-   el flag del DT eso puede ser el nivel fisico que deja el chip ASERTADO. En
-   vez de adivinar el flag se prueban LAS DOS polaridades y se registra cual
-   funciona (DACE-RAY) para fijar luego el flag en el DT.
+2) The driver finishes power_on leaving reset at LOGICAL level 0; depending on
+   the DT flag that may be the physical level that leaves the chip ASSERTED.
+   Instead of guessing the flag, BOTH polarities are tried and the one that
+   works is logged (DACE-RAY) to later set the flag in the DT.
 
 Upstream-Status: Inappropriate [dace bring-up]
 ---
@@ -28,13 +29,13 @@ index bdb3e2c3ab79..fb6d2ffb729c 100644
 -		return 0;
 -
 -	gpiod_set_value_cansleep(ts->reset_gpio, 1);
-+	/* dace: el upstream SALE sin encender los reguladores si no hay GPIO de
-+	 * reset ("if (!ts->reset_gpio) return 0"), dando por hecho que los
-+	 * rieles ya estan encendidos. Aqui se encienden SIEMPRE: en el T5 el
-+	 * riel analogico (L29A, 2.8V) no lo usa nadie mas, asi que sin esto el
-+	 * chip queda SIN ALIMENTAR y no contesta a i2c. */
++	/* dace: upstream RETURNS without turning on the regulators if there is
++	 * no reset GPIO ("if (!ts->reset_gpio) return 0"), assuming the rails are
++	 * already on. Here they are ALWAYS turned on: on the T5 the analog rail
++	 * (L29A, 2.8V) is not used by anyone else, so without this the chip is
++	 * UNPOWERED and does not answer i2c. */
 +	dev_info(&ts->client->dev, "DACE-RAY: power_on (reset_gpio=%s)\n",
-+		 ts->reset_gpio ? "si" : "NO");
++		 ts->reset_gpio ? "yes" : "NO");
 +
 +	if (ts->reset_gpio)
 +		gpiod_set_value_cansleep(ts->reset_gpio, 1);
@@ -67,8 +68,8 @@ index bdb3e2c3ab79..fb6d2ffb729c 100644
  	struct raydium_data *ts = _data;
  
 -	if (ts->reset_gpio) {
-+	/* dace: los reguladores se encienden siempre en power_on, asi que se
-+	 * apagan siempre aqui (el gpio de reset es opcional). */
++	/* dace: the regulators are always turned on in power_on, so they are
++	 * always turned off here (the reset gpio is optional). */
 +	if (ts->reset_gpio)
  		gpiod_set_value_cansleep(ts->reset_gpio, 1);
 -		regulator_disable(ts->vccio);
@@ -85,8 +86,8 @@ index bdb3e2c3ab79..fb6d2ffb729c 100644
  
 +	dev_info(&client->dev,
 +		 "DACE-RAY: probe avdd=%s vccio=%s reset_gpio=%s irq=%d\n",
-+		 ts->avdd ? "si" : "no", ts->vccio ? "si" : "no",
-+		 ts->reset_gpio ? "si" : "NO", client->irq);
++		 ts->avdd ? "yes" : "no", ts->vccio ? "yes" : "no",
++		 ts->reset_gpio ? "yes" : "NO", client->irq);
 +
  	error = raydium_i2c_power_on(ts);
  	if (error)

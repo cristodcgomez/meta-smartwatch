@@ -1,27 +1,28 @@
+# AI Assisted:
 From: TicWatch Pro 5 port
-Subject: [PATCH] interconnect: icc-rpm: enable real RPM voting (Paso C)
+Subject: [PATCH] interconnect: icc-rpm: enable real RPM voting (Step C)
 
-Revierte el stub de `icc-rpm-novote.patch` para que el qnoc-monaco vuelva a
-votar de verdad al RPM (clk_set_rate de los bus clocks + msm_rpm_send_message
-para master/slave BW + QoS).
+Reverts the stub from `icc-rpm-novote.patch` so qnoc-monaco votes to the RPM for
+real again (clk_set_rate of the bus clocks + msm_rpm_send_message for
+master/slave BW + QoS).
 
-Correccion del PLAN-CAUSA-RAIZ (Paso A-2): el "vendor" que se comparo
-(t5-gki-kernel, Winkmoon) NO es el vendor de monaco -- es un GKI 5.15.202
-generico SIN qnoc monaco, sin slate y sin drivers/rpmsg/rpm-smd.c. El vendor
-REAL de monaco (mobvoi/mobvoi-ticwatch-kernel y rcky844/android_kernel_mobvoi_monaco)
-usa EXACTAMENTE nuestro mismo camino:
+Correction of the root-cause analysis (Step A-2): the "vendor" that was compared
+(t5-gki-kernel, Winkmoon) is NOT the monaco vendor -- it is a generic GKI
+5.15.202 WITHOUT qnoc monaco, without slate and without drivers/rpmsg/rpm-smd.c.
+The REAL monaco vendor (mobvoi/mobvoi-ticwatch-kernel and
+rcky844/android_kernel_mobvoi_monaco) uses EXACTLY our same path:
 
-  - drivers/interconnect/qcom/icc-rpm.c: practicamente identico al nuestro
-    (solo difieren licencias/EXPORT_SYMBOL y el mapeo de tags en aggregate).
-    Ambos llaman qcom_icc_rpm_smd_send_msg() -> msm_rpm_send_message()
-    (drivers/rpmsg/rpm-smd.c), NO qcom_rpm_smd_write() (smd-rpm).
-  - drivers/clk/qcom/clk-smd-rpm.c: tambien vota con msm_rpm_send_message() en
-    AMBOS arboles. Es decir: en nuestro kernel los relojes "que funcionan" usan
-    la MISMA API que el ICC. No hay ninguna "via smd-rpm que funciona".
+  - drivers/interconnect/qcom/icc-rpm.c: practically identical to ours (only
+    licenses/EXPORT_SYMBOL and the tag mapping in aggregate differ).
+    Both call qcom_icc_rpm_smd_send_msg() -> msm_rpm_send_message()
+    (drivers/rpmsg/rpm-smd.c), NOT qcom_rpm_smd_write() (smd-rpm).
+  - drivers/clk/qcom/clk-smd-rpm.c: also votes with msm_rpm_send_message() in
+    BOTH trees. That is: in our kernel the clocks "that work" use the SAME API
+    as the ICC. There is no "smd-rpm path that works".
 
-Por tanto NO hay port de smd-rpm que hacer: la unica diferencia funcional es
-el stub. Este parche solo lo quita. Aplicar SOLO para el experimento Paso C
-(arrancar con `boot console` + capture-consola + crashlog y ver donde muere).
+Therefore there is NO smd-rpm port to do: the only functional difference is the
+stub. This patch just removes it. Apply ONLY for the Step C experiment (boot with
+`boot console` + capture-consola + crashlog and see where it dies).
 
 Upstream-Status: Inappropriate [dace bring-up]
 ---
@@ -33,14 +34,14 @@ diff --git a/drivers/interconnect/qcom/icc-rpm.c b/drivers/interconnect/qcom/icc
   */
  int qcom_icc_rpm_set(struct icc_node *src, struct icc_node *dst)
  {
--	/* dace bring-up: no enviar votes al RPM. El crash duro a EDL tras el
--	 * registro de los nodos ICC apunta al voting RPM (icc_set_bw ->
--	 * qcom_icc_rpm_set -> qcom_icc_rpm_smd_send). Con este stub los drivers
--	 * obtienen sus paths (deferred resuelto, eMMC vivo) sin tocar el RPM;
--	 * el bus queda con los rates que dejó el bootloader (suficiente para
--	 * bring-up). Quitar cuando el voting RPM esté depurado. */
+-	/* dace bring-up: do not send votes to the RPM. The hard crash to EDL
+-	 * after the ICC nodes of qnoc-monaco register points at RPM voting
+-	 * (icc_set_bw -> qcom_icc_rpm_set -> qcom_icc_rpm_smd_send). With this
+-	 * stub the drivers get their paths (deferred resolved, eMMC alive)
+-	 * without touching the RPM; the bus keeps the rates the bootloader left
+-	 * (enough for bring-up). Remove once RPM voting is debugged. */
 -	return 0;
--#pragma message("dace: qcom_icc_rpm_set STUB (sin voting RPM)")
+-#pragma message("dace: qcom_icc_rpm_set STUB (no RPM voting)")
  	struct qcom_icc_provider *qp;
  	struct qcom_icc_node *qn;
  	struct icc_node *n, *node;

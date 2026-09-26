@@ -1,5 +1,5 @@
 [Unit]
-Description=dace: arranca los HAL de graficos del contenedor (allocator + composer)
+Description=dace: start the container graphics HALs (allocator + composer)
 DefaultDependencies=no
 After=dace-lxc-android.service
 Requires=dace-lxc-android.service

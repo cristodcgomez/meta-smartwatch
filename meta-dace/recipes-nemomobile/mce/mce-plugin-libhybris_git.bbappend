@@ -1,9 +1,9 @@
-# dace: la receta original de meta-asteroid solo declara
+# dace: the original meta-asteroid recipe only declares
 #     DEPENDS += "mce libmce-glib"
-# y el do_compile falla con:
+# and do_compile fails with:
 #     plugin-config.h:32:11: fatal error: glib.h: No such file or directory
-# porque glib-2.0 no esta en su sysroot (llegaba solo como dependencia de
-# libmce-glib, que no basta para los headers). Ademas, al ser el "plugin
-# libhybris" de mce, necesita las cabeceras de libhybris (el plugin habla con
-# el HAL de Android a traves de ella).
+# because glib-2.0 is not in its sysroot (it only arrived as a dependency of
+# libmce-glib, which is not enough for the headers). Also, being mce's "libhybris
+# plugin", it needs the libhybris headers (the plugin talks to the Android HAL
+# through it).
 DEPENDS += "glib-2.0 libhybris"

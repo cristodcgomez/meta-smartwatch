@@ -1,28 +1,28 @@
 From: TicWatch Pro 5 (dace) port
 Subject: [PATCH] iommu/arm-smmu: honor "qcom,skip-init" (dace bring-up)
 
-El kernel de google-eos (aurora/Pixel Watch) elimino el soporte de la
-propiedad downstream "qcom,skip-init", que el stock Mobvoi 5.15 y el
-monaco-gki 5.4 si tienen:
+The google-eos kernel (aurora/Pixel Watch) removed support for the
+downstream "qcom,skip-init" property, which the Mobvoi stock 5.15 and the
+monaco-gki 5.4 do have:
 
     arm-smmu.c:  { ARM_SMMU_OPT_SKIP_INIT, "qcom,skip-init" },
     arm-smmu.h:  #define ARM_SMMU_OPT_SKIP_INIT  (1 << 1)
     arm_smmu_device_reset():
         if (!(smmu->options & ARM_SMMU_OPT_SKIP_INIT) || hibernation)
-                <reset de SMRn/S2CRn/CBn>
+                <reset of SMRn/S2CRn/CBn>
 
-El DT del T5 marca apps-smmu@0xc600000 (qcom,qsmmuv500) con qcom,skip-init:
-el firmware seguro (TZ) ya lo ha programado y Linux NO debe reescribirlo.
-Sin el guard, al cargar qnoc-monaco (que registra los nodos ICC y
-desbloquea el probe de apps-smmu) el driver reescribe los 40 SMRs y los 50
-context banks de un SMMU inicializado por firmware y el SoC se resetea en
-duro a EDL, sin oops ni pstore (visto en consola USB: ultima linea
+The T5 DT marks apps-smmu@0xc600000 (qcom,qsmmuv500) with qcom,skip-init:
+the secure firmware (TZ) has already programmed it and Linux must NOT rewrite
+it. Without the guard, loading qnoc-monaco (which registers the ICC nodes and
+unblocks the apps-smmu probe) makes the driver rewrite the 40 SMRs and 50
+context banks of a firmware-initialized SMMU and the SoC hard-resets to EDL,
+with no oops and no pstore (seen on the USB console: last line
 "arm-smmu c600000.apps-smmu: Stage-1: 36-bit VA -> 36-bit IPA").
 
-Se anade ademas telemetria de color en pantalla (dace_smmu_mark) sobre el
-framebuffer de continuous-splash (0x5c000000): el panel conserva el ultimo
-contenido tras el reset, asi que el color que quede identifica el ultimo
-paso alcanzado del probe (el T5 no tiene UART).
+On-screen color telemetry (dace_smmu_mark) is also added over the
+continuous-splash framebuffer (0x5c000000): the panel keeps the last content
+after the reset, so the remaining color identifies the last step reached of
+the probe (the T5 has no UART).
 
 Upstream-Status: Inappropriate [dace bring-up]
 ---
@@ -37,16 +37,16 @@ index b5067375dd33..13789c9282b4 100644
 +/*
 + * dace (TicWatch Pro 5 / monaco) bring-up telemetry.
 + *
-+ * Pinta la pantalla completa de un color solido sobre el continuous-splash
-+ * framebuffer (splash_region@0x5c000000, RAM reservada SIN no-map -> esta en
-+ * el linear map). El panel sigue mostrando el ultimo contenido tras un reset
-+ * duro a EDL, asi que el color que quede en pantalla identifica el ultimo paso
-+ * alcanzado. El T5 no tiene UART.
++ * Paints the full screen with a solid color over the continuous-splash
++ * framebuffer (splash_region@0x5c000000, reserved RAM WITHOUT no-map -> it is in
++ * the linear map). The panel keeps showing the last content after a hard reset
++ * to EDL, so the color left on screen identifies the last step reached. The T5
++ * has no UART.
 + *
 + *   0x101010 cfg_probe start     0x00ff00 handoff_cbs start
 + *   0x0000ff cfg_probe done      0x00ffff handoff_cbs done
 + *   0xffff00 reset start         0xff00ff reset done  0xffffff probe end
-+ *   0xff0000 fallo
++ *   0xff0000 failure
 + */
 +#define DACE_SMMU_FB_PHYS	0x5c000000ULL
 +#define DACE_SMMU_FB_NPIX	(640 * 400)
@@ -56,8 +56,8 @@ index b5067375dd33..13789c9282b4 100644
 +	u32 *fb = (u32 *)phys_to_virt((phys_addr_t)DACE_SMMU_FB_PHYS);
 +	size_t i;
 +
-+	/* La consola (ttyGS0 por el gadget ACM) es el canal fiable: en el reset a
-+	 * EDL el panel se apaga y la pantalla no sirve para telemetria. */
++	/* The console (ttyGS0 over the ACM gadget) is the reliable channel: on the
++	 * reset to EDL the panel turns off and the screen is useless for telemetry. */
 +	dev_err(dev, "DACE-SMMU %s: %s\n", dev_name(dev), t);
 +
 +	if (!fb)
@@ -85,15 +85,15 @@ index b5067375dd33..13789c9282b4 100644
 +	dace_smmu_mark(smmu->dev, 0x00ffa500, "S7b reset: sGFSR OK");
  
 +	/*
-+	 * dace: honrar "qcom,skip-init". El firmware seguro (TZ) ya ha
-+	 * programado este SMMU (qsmmuv500) y el DT lo declara. El kernel de
-+	 * google-eos NO implementa la propiedad (el stock Mobvoi 5.15 y el
-+	 * monaco-gki 5.4 SI: arm_smmu_options[] + este mismo guard), asi que
-+	 * reescribia SMRn/S2CRn/CBn de un SMMU ya inicializado por el firmware;
-+	 * esa escritura es una violacion de seguridad y el SoC se resetea en
-+	 * duro a EDL (sin oops ni pstore) en cuanto qnoc-monaco registra los ICC
-+	 * y desbloquea el probe de apps-smmu. Con el guard el SMMU queda tal
-+	 * como lo dejo el bootloader (que es lo que pide el DT).
++	 * dace: honor "qcom,skip-init". The secure firmware (TZ) has already
++	 * programmed this SMMU (qsmmuv500) and the DT declares it. The google-eos
++	 * kernel does NOT implement the property (the Mobvoi stock 5.15 and
++	 * monaco-gki 5.4 DO: arm_smmu_options[] + this same guard), so it rewrote
++	 * SMRn/S2CRn/CBn of a SMMU already initialized by the firmware; that write
++	 * is a security violation and the SoC hard-resets to EDL (no oops, no
++	 * pstore) as soon as qnoc-monaco registers the ICC and unblocks the
++	 * apps-smmu probe. With the guard the SMMU stays as the bootloader left it
++	 * (which is what the DT asks for).
 +	 */
 +	if (!(smmu->options & ARM_SMMU_OPT_SKIP_INIT)) {
 +		dace_smmu_mark(smmu->dev, 0x00ff00ff, "S7c reset: SMR/CB WRITES");
@@ -117,17 +117,17 @@ index b5067375dd33..13789c9282b4 100644
  }
  
 +/*
-+ * dace (TicWatch Pro 5 / monaco): con "qcom,skip-init" el firmware/TZ dejo la
-+ * tabla SMR/S2CR ya programada en el apps-smmu (el eMMC, el display y demas
-+ * masters tienen sus entradas) y Linux NO la reescribe. El problema es que
-+ * smmu->smrs[]/s2crs[] arrancan vacios, asi que arm_smmu_find_sme() cree que
-+ * TODAS las entradas estan libres: arm_smmu_test_smr_masks() escribe SMR(0) sin
-+ * el bit VALID y arm_smmu_add_device() asigna SMRs encima -> un master ya
-+ * configurado por el firmware pierde su traduccion. Visto en el T5:
-+ * el eMMC tiene iommus = <&apps_smmu 0xc0 0> + qcom,iommu-dma = "bypass", y
-+ * tras cargar qnoc aparece "mmc0: ADMA error: 0x02000000" y el SoC resetea a
-+ * EDL. Leemos la tabla viva y marcamos las entradas en uso como validas y
-+ * pinned para que Linux las respete.
++ * dace (TicWatch Pro 5 / monaco): with "qcom,skip-init" the firmware/TZ left the
++ * SMR/S2CR table already programmed in the apps-smmu (the eMMC, the display and
++ * other masters have their entries) and Linux does NOT rewrite it. The problem
++ * is that smmu->smrs[]/s2crs[] start empty, so arm_smmu_find_sme() believes
++ * that ALL entries are free: arm_smmu_test_smr_masks() writes SMR(0) without
++ * the VALID bit and arm_smmu_add_device() assigns SMRs on top -> a master
++ * already configured by the firmware loses its translation. Seen on the T5:
++ * the eMMC has iommus = <&apps_smmu 0xc0 0> + qcom,iommu-dma = "bypass", and
++ * after loading qnoc "mmc0: ADMA error: 0x02000000" appears and the SoC resets
++ * to EDL. We read the live table and mark the entries in use as valid and
++ * pinned so Linux respects them.
 + */
 +static void arm_smmu_mark_hw_smrs(struct arm_smmu_device *smmu)
 +{
@@ -162,13 +162,13 @@ index b5067375dd33..13789c9282b4 100644
 +		smmu->s2crs[i].pinned = true;
 +
 +		/*
-+		 * MUY importante: reservar tambien el CONTEXT BANK del firmware.
-+		 * El handoff downstream hace bitmap_set(context_map, cbndx) por esto:
-+		 * si no lo marcamos, cuando Linux enlaza un master nuevo (el SDE del
-+		 * display, p.ej.) le asigna un CB que el firmware YA usaba para otro
-+		 * master (el eMMC) -> aquel pierde su contexto y su DMA revienta.
-+		 * Visto en el T5: con el display arriba, la primera lectura del eMMC
-+		 * (fsck/mount de mmcblk0p62) reseteaba el SoC a EDL.
++		 * VERY important: also reserve the firmware's CONTEXT BANK.
++		 * The downstream handoff does bitmap_set(context_map, cbndx) for this:
++		 * if we do not mark it, when Linux binds a new master (the display SDE,
++		 * e.g.) it assigns a CB the firmware ALREADY used for another master
++		 * (the eMMC) -> that one loses its context and its DMA blows up. Seen
++		 * on the T5: with the display up, the first eMMC read (fsck/mount of
++		 * mmcblk0p62) reset the SoC to EDL.
 +		 */
 +		if (smmu->s2crs[i].type == S2CR_TYPE_TRANS) {
 +			bitmap_set(smmu->context_map, smmu->s2crs[i].cbndx, 1);
@@ -178,7 +178,7 @@ index b5067375dd33..13789c9282b4 100644
 +	}
 +
 +	dev_err(smmu->dev,
-+		"DACE-SMMU %s: tabla del firmware: %d/%d SMR en uso, %d context banks reservados\n",
++		"DACE-SMMU %s: firmware table: %d/%d SMR in use, %d context banks reserved\n",
 +		dev_name(smmu->dev), used, smmu->num_mapping_groups, cbs);
 +}
 +
@@ -193,7 +193,7 @@ index b5067375dd33..13789c9282b4 100644
  	err = arm_smmu_device_cfg_probe(smmu);
 -	if (err)
 +	if (err) {
-+		dace_smmu_mark(dev, 0x00ff0000, "S1 cfg_probe FALLO");
++		dace_smmu_mark(dev, 0x00ff0000, "S1 cfg_probe FAILURE");
  		goto out_power_off;
 +	}
 +	dace_smmu_mark(dev, 0x000000ff, "S2 cfg_probe OK");
@@ -210,7 +210,7 @@ index b5067375dd33..13789c9282b4 100644
  	err = arm_smmu_handoff_cbs(smmu);
 -	if (err)
 +	if (err) {
-+		dace_smmu_mark(dev, 0x00ff0000, "S3 handoff_cbs FALLO");
++		dace_smmu_mark(dev, 0x00ff0000, "S3 handoff_cbs FAILURE");
  		goto out_power_off;
 +	}
 +	dace_smmu_mark(dev, 0x0000ffff, "S4 handoff_cbs OK");

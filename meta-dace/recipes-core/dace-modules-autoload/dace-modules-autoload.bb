@@ -1,25 +1,25 @@
-SUMMARY = "dace: modulos post-rootfs (lista de autoload + blacklist de vendor)"
-DESCRIPTION = "Los .ko de /lib/modules/<krel>/vendor/ (linux-dace-modules) \
-solo son alcanzables DESPUES del switch_root al rootfs (el ramdisk del VKB \
-solo lleva los criticos del boot), asi que su carga va por \
+SUMMARY = "dace: post-rootfs modules (autoload list + vendor blacklist)"
+DESCRIPTION = "The .ko's in /lib/modules/<krel>/vendor/ (linux-dace-modules) \
+are only reachable AFTER the switch_root to the rootfs (the VKB ramdisk only \
+carries the boot-critical ones), so their load goes through \
 systemd-modules-load.d/dace-post-rootfs.conf. \
-OJO: ese fichero se entrega CON LA LISTA COMENTADA porque esa cadena de \
-modulos (WLAN/icnss2 + ASoC + BT) tumba el SoC a EDL a los ~10 s: el \
-disparador real es el coldplug de udev por modalias, pero \
-systemd-modules-load hace 'modprobe <modulo>' explicito y 'blacklist' NO \
-bloquea eso (solo los alias). De ahi que ademas se instale \
-/etc/modprobe.d/00-dace-vendor-blacklist.conf (76 modulos, bloquea a udev) y \
-que la lista de autoload tenga que quedar comentada hasta bisecar el culpable: \
-descomentar lineas es la forma de bisecarlo."
+NOTE: that file used to be shipped WITH THE LIST COMMENTED OUT because that \
+module chain (WLAN/icnss2 + ASoC + BT) took the SoC down to EDL at ~10 s: the \
+real trigger is udev's coldplug by modalias, but systemd-modules-load does an \
+explicit 'modprobe <module>' and 'blacklist' does NOT block that (only \
+aliases). That is why /etc/modprobe.d/00-dace-vendor-blacklist.conf is also \
+installed (76 modules, blocks udev) and why the autoload list had to stay \
+commented out until the culprit was bisected: uncommenting lines is how it is \
+bisected."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 COMPATIBLE_MACHINE = "dace"
 
-# 18-09-2026: la lista ya NO va comentada. Se comprobo que kmod aplica el
-# blacklist como *deny-list* tambien al `modprobe` de systemd-modules-load
-# ("Module 'wlan' is deny-listed (by kmod)"), por lo que ese servicio no
-# sirve para cargar la cadena. La mete a mano dace-modules-load.service, que
-# hace `modprobe` explicito (eso SI ignora la deny-list) leyendo el mismo
+# 2026-09-18: the list is NO LONGER commented out. It was verified that kmod
+# applies the blacklist as a *deny-list* also to systemd-modules-load's
+# `modprobe` ("Module 'wlan' is deny-listed (by kmod)"), so that service cannot
+# load the chain. dace-modules-load.service loads it by hand, doing an explicit
+# `modprobe` (which DOES ignore the deny-list) reading the same
 # /etc/modules-load.d/dace-post-rootfs.conf.
 inherit systemd
 
@@ -35,11 +35,11 @@ SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 do_install() {
     install -d -m 0755 ${D}${sysconfdir}/modules-load.d
     install -m 0644 ${UNPACKDIR}/dace-post-rootfs.conf ${D}${sysconfdir}/modules-load.d/dace-post-rootfs.conf
-    # Los modulos vendor los carga udev (no modules-load) y tumban el SoC: se
-    # bloquean con modprobe.d (ver el comentario del propio fichero).
+    # The vendor modules are loaded by udev (not modules-load) and take the SoC
+    # down: they are blocked with modprobe.d (see the file's own comment).
     install -d -m 0755 ${D}${sysconfdir}/modprobe.d
     install -m 0644 ${UNPACKDIR}/dace-vendor-blacklist.conf ${D}${sysconfdir}/modprobe.d/00-dace-vendor-blacklist.conf
-    # Carga explicita (la deny-list del blacklist bloquea a systemd-modules-load).
+    # Explicit load (the blacklist deny-list blocks systemd-modules-load).
     install -d -m 0755 ${D}${libexecdir}
     install -m 0755 ${UNPACKDIR}/dace-modules-load.sh ${D}${libexecdir}/dace-modules-load.sh
     install -d -m 0755 ${D}${systemd_system_unitdir}

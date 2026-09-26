@@ -108,19 +108,19 @@ for src in /android/vendor /android/vendor_dlkm; do
     fi
 done
 
-# ─ Firmware del BT (WCN3988) donde el HAL vendor lo busca ───────────────
-# El HAL Qualcomm abre /dev/ttyHS0, alimenta el chip y pide el firmware por la
-# ruta estandar de Android (/vendor/firmware, /bt_firmware/image, /etc/firmware).
-# Nuestro dace-bt-firmware lo deja en /lib/firmware/qca del HOST, que esa ruta
-# no mira -> montamos un overlay por bind: staging con el contenido del
-# /vendor/firmware stock + los ficheros BT.
-# Que familia hace falta depende del SOC que elija el HAL (que lo deduce del
-# compatible del nodo BT del DT, ver dace-boot-images.bb):
+# ─ BT firmware (WCN3988) where the vendor HAL looks for it ──────────────
+# The Qualcomm HAL opens /dev/ttyHS0, powers the chip and requests the firmware
+# through the standard Android path (/vendor/firmware, /bt_firmware/image,
+# /etc/firmware). Our dace-bt-firmware leaves it in the HOST's /lib/firmware/qca,
+# which that path does not look at -> we mount a bind overlay: staging with the
+# contents of the stock /vendor/firmware + the BT files.
+# Which family is needed depends on the SOC the HAL picks (which it derives from
+# the compatible of the DT BT node, see dace-boot-images.bb):
 #   - soc=slate (stock, qcom,qcc5100) -> **slbtfw20.mbn + slnv20.bin** (sl*)
-#     -> es la que se usa hoy; sin ella: 'File Open Fail' y 'Controller Init
-#        failed' (el chip contesta Get Version pero no recibe el patch).
-#   - soc=cherokee (ruta btattach/btqca) -> apbtfw11.tlv + apnv11.bin (ap*)
-# Se copian las dos familias; son ~320 KB en total.
+#     -> the one used today; without it: 'File Open Fail' and 'Controller Init
+#        failed' (the chip answers Get Version but does not receive the patch).
+#   - soc=cherokee (btattach/btqca path) -> apbtfw11.tlv + apnv11.bin (ap*)
+# Both families are copied; they are ~320 KB in total.
 BTFW_SRC=/lib/firmware/qca
 if [ -d "$BTFW_SRC" ] && [ -d "$ROOTFS/vendor/firmware" ]; then
     VFW_STAGE=/run/dace-vendor-firmware
@@ -135,7 +135,7 @@ if [ -d "$BTFW_SRC" ] && [ -d "$ROOTFS/vendor/firmware" ]; then
         cp -a "$_f" "$VFW_STAGE/" 2>/dev/null && _n=$((_n + 1))
     done
     if mount --bind "$VFW_STAGE" "$ROOTFS/vendor/firmware"; then
-        echo "dace-lxc-android: overlay /vendor/firmware (+$_n ficheros BT)"
+        echo "dace-lxc-android: overlay /vendor/firmware (+$_n BT files)"
     fi
 fi
 
@@ -194,17 +194,17 @@ if [ -f "$PIXELSTATS_RC" ] && ! mountpoint -q "$PIXELSTATS_RC"; then
     fi
 fi
 
-# -- powerstateservice: anadirle la linea 'interface' ---------------
-# Su .rc (vendor.qti.hardware.powerstateservice@1.0-service.rc) declara el
-# servicio pero SIN 'interface', asi que hwservicemanager no puede mapear el
-# `ctl.interface_start` que emiten los clientes y el servicio NUNCA arranca:
+# -- powerstateservice: add the 'interface' line to it ---------------
+# Its .rc (vendor.qti.hardware.powerstateservice@1.0-service.rc) declares the
+# service but WITHOUT 'interface', so hwservicemanager cannot map the
+# `ctl.interface_start` that clients emit and the service NEVER starts:
 #   init: Control message: Could not find
 #     'vendor.qti.hardware.powerstateservice@1.0::IPowerStateService/default'
-# (cada ~60 s, para siempre). Y es el PEER de estado del MCU slate (TWM/deep
-# sleep, /dev/power_state + /dev/slate_com_dev): sin el, el MCU se queda sin
-# quien le conteste y el SoC acaba en Oops a los pocos segundos de levantar el
-# enlace. Se overlaide el .rc con la linea anadida (mismo bind-mount que los
-# de USB/pixelstats) para que init lo arranque solo.
+# (every ~60 s, forever). And it is the slate MCU's state PEER (TWM/deep
+# sleep, /dev/power_state + /dev/slate_com_dev): without it, the MCU is left
+# with nobody to answer it and the SoC ends in an Oops a few seconds after
+# bringing up the link. The .rc is overlaid with the added line (same bind-mount
+# as the USB/pixelstats ones) so init starts it on its own.
 PSS_RC="$VENDOR_INIT/vendor.qti.hardware.powerstateservice@1.0-service.rc"
 if [ -f "$PSS_RC" ] && ! mountpoint -q "$PSS_RC"; then
     if grep -qE '^[[:space:]]*interface[[:space:]]' "$PSS_RC"; then
@@ -213,7 +213,7 @@ if [ -f "$PSS_RC" ] && ! mountpoint -q "$PSS_RC"; then
         awk '{ print } /^service[[:space:]]/ { print "    interface vendor.qti.hardware.powerstateservice@1.0::IPowerStateService default" }' \
             "$PSS_RC" > /run/dace-pss-service.rc 2>/dev/null
         if [ -s /run/dace-pss-service.rc ] && mount --bind /run/dace-pss-service.rc "$PSS_RC"; then
-            echo "dace-lxc-android: powerstateservice .rc con 'interface' (init lo arranca solo)"
+            echo "dace-lxc-android: powerstateservice .rc with 'interface' (init starts it on its own)"
         fi
     fi
 fi
@@ -326,8 +326,8 @@ service servicemanager /system/bin/servicemanager
 RC
 
 # system_dlkm (kernel modules for the Android container) -- mounted at
-# $ROOTFS/system_dlkm. El dm device lo crea dace-vendor-mount.service.
-# (En el T5 es un solo device sin sufijo _b, a diferencia del PW2.)
+# $ROOTFS/system_dlkm. The dm device is created by dace-vendor-mount.service.
+# (On the T5 it is a single device without a _b suffix, unlike the PW2.)
 if [ -b /dev/mapper/system_dlkm ] && [ -d $ROOTFS/system_dlkm ]; then
     if ! mountpoint -q $ROOTFS/system_dlkm; then
         mount -o ro /dev/mapper/system_dlkm $ROOTFS/system_dlkm 2>/dev/null && \
@@ -344,7 +344,7 @@ if [ -b /dev/mmcblk0p24 ] && [ -d $ROOTFS/metadata ]; then
 fi
 
 # Vendor firmware (vfat partition mounted INSIDE vendor). T5: p14 = modem,
-# que es un VFAT con image/ (modem.mdt + modem.b*) y verinfo.
+# which is a VFAT with image/ (modem.mdt + modem.b*) and verinfo.
 if [ -b /dev/mmcblk0p14 ] && [ -d $ROOTFS/vendor/firmware_mnt ]; then
     if ! mountpoint -q $ROOTFS/vendor/firmware_mnt; then
         mount -t vfat -o ro,uid=1000,gid=1000,fmask=0337,dmask=0227 \
@@ -367,14 +367,14 @@ if [ -d "$ROOTFS/data" ] && ! mountpoint -q "$ROOTFS/data"; then
     fi
 fi
 
-# WLAN: /data/vendor/wifi/sockets ANTES de lanzar el init de Android.
-# cnss-daemon (class late_start, init.qcom.rc) bindea ahi su "user socket";
-# sin el muere con "Fail to bind user socket" y el puente cnss-genl del WLAN
-# nunca sube. El init de Android NO lo crea (su post-fs-data hace
-# `mkdir /data/vendor` con encryption=Require y en un /data tmpfs plano sin FBE
-# falla). Lo creamos en el namespace del host: el tmpfs de /data ya esta
-# montado en $ROOTFS/data y el contenedor lo hereda, asi que init y
-# cnss-daemon lo ven. Patron de aurora (que tambien monta /data como tmpfs).
+# WLAN: /data/vendor/wifi/sockets BEFORE launching the Android init.
+# cnss-daemon (class late_start, init.qcom.rc) binds its "user socket" there;
+# without it it dies with "Fail to bind user socket" and the WLAN cnss-genl
+# bridge never comes up. The Android init does NOT create it (its post-fs-data
+# does `mkdir /data/vendor` with encryption=Require and on a plain /data tmpfs
+# without FBE it fails). We create it in the host namespace: the /data tmpfs is
+# already mounted at $ROOTFS/data and the container inherits it, so init and
+# cnss-daemon see it. Aurora pattern (which also mounts /data as tmpfs).
 if mountpoint -q "$ROOTFS/data"; then
     mkdir -p "$ROOTFS/data/vendor/wifi/sockets" \
              "$ROOTFS/data/vendor/wifi/wpa/sockets" 2>/dev/null

@@ -1,9 +1,9 @@
-SUMMARY = "dace: log persistente de energia/suspend (verificacion sin adb)"
-DESCRIPTION = "Servicio que cada 30 s escribe suspend_stats, autosleep, wake \
-locks, capacidad de bateria y wakeup_sources activas a \
-/var/log/dace-power.log. Necesario porque al cargar el smblite aparece la psy \
-'usb' y usb-moded puede cambiar el modo USB a mass storage (se pierde adb), \
-asi que la verificacion del suspend no puede depender de una sesion adb viva."
+SUMMARY = "dace: persistent power/suspend log (verification without adb)"
+DESCRIPTION = "Service that every 30 s writes suspend_stats, autosleep, wake \
+locks, battery capacity and active wakeup_sources to \
+/var/log/dace-power.log. Needed because when smblite loads the 'usb' psy \
+appears and usb-moded may switch the USB mode to mass storage (adb is lost), \
+so suspend verification cannot depend on a live adb session."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 COMPATIBLE_MACHINE = "dace"

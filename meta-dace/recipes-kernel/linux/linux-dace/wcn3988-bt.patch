@@ -1,16 +1,16 @@
 From: TicWatch Pro 5 port
 Subject: [PATCH] Bluetooth: hci_qca/btqca: add WCN3988 support + LDISC default (dace)
 
-Backport minimo del soporte QCA WCN3988 (BT del T5) desde t5-gki-kernel 5.15:
- - btqca.h: enum QCA_WCN3988 (+ en qca_is_wcn399x).
- - btqca.c: rom_ver distinto y nombres "qca/apbtfw%02x.tlv" / "qca/apnv%02x.bin".
- - hci_qca.c: qca_soc_data_wcn3988 + compatible "qcom,wcn3988-bt" (serdev, por
-   si algun dia se porta serdev al geni-serial).
- - hci_qca.c: en la ruta LDISC (btattach, sin serdev) forzar QCA_WCN3988 en vez
-   de QCA_ROME (dace-only; ningun driver geni-serial de este arbol soporta
-   serdev, asi que el HCI va por btattach -P qca).
+Minimal backport of QCA WCN3988 support (the T5 BT) from t5-gki-kernel 5.15:
+ - btqca.h: QCA_WCN3988 enum (+ in qca_is_wcn399x).
+ - btqca.c: distinct rom_ver and "qca/apbtfw%02x.tlv" / "qca/apnv%02x.bin" names.
+ - hci_qca.c: qca_soc_data_wcn3988 + compatible "qcom,wcn3988-bt" (serdev, in
+   case serdev is ever ported to geni-serial).
+ - hci_qca.c: on the LDISC path (btattach, no serdev) force QCA_WCN3988 instead
+   of QCA_ROME (dace-only; no geni-serial driver in this tree supports serdev,
+   so the HCI goes through btattach -P qca).
 
-Rieles reales (del stock monaco-standalone-idp-v1.dtsi): IO=L17A (0x184),
+Real rails (from the stock monaco-standalone-idp-v1.dtsi): IO=L17A (0x184),
 core/RFA=L13A (0x181), PA/CH0=L26A (0x84).
 
 Upstream-Status: Inappropriate [dace bring-up]
@@ -81,10 +81,10 @@ index 56b4b7248..029ba49c9 100644
  		soc_type = qsd->btsoc_type;
  	} else {
 -		soc_type = QCA_ROME;
-+		/* dace bring-up: el BT se arranca por la ruta LDISC
-+		 * (btattach) y este kernel solo corre en el T5, cuyo chip es
-+		 * un WCN3988. Sin esto se asume QCA_ROME y el firmware
-+		 * "ap" (apbtfw/apnv) no se encuentra. */
++		/* dace bring-up: the BT is brought up on the LDISC path
++		 * (btattach) and this kernel only runs on the T5, whose chip is
++		 * a WCN3988. Without this QCA_ROME is assumed and the "ap"
++		 * firmware (apbtfw/apnv) is not found. */
 +		soc_type = QCA_WCN3988;
  	}
  

@@ -1,3 +1,4 @@
+# AI Assisted:
 SUMMARY = "Dace flashable boot artifacts: boot.img, vendor_kernel_boot.img, init_boot.img"
 DESCRIPTION = "\
 Builds the three .img files dace's bootloader expects, end-to-end from \
@@ -18,9 +19,9 @@ bootloader-assembled one anyway."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
-# Los DTBs vienen de ota-stock/blobs: monaco-real.dtb + monacop.dtb son los
-# que el ABL del T5 espera (board-id T5). vkb-base.dtb (aurora) fue rechazado
-# por el ABL (EDL 05c6:900e). monaco-real ya trae ramoops@9ff00000 y splash.
+# The DTBs come from ota-stock/blobs: monaco-real.dtb + monacop.dtb are the
+# ones the T5 ABL expects (T5 board-id). vkb-base.dtb (aurora) was rejected
+# by the ABL (EDL 05c6:900e). monaco-real already carries ramoops@9ff00000 and splash.
 SRC_URI = "\
     file://dace-vkb-assemble.py \
     file://dace-vkb-modules.lst \
@@ -72,9 +73,9 @@ inherit deploy nopackages
 # require resolves from any recipe in meta-dace.
 require recipes-kernel/linux/linux-dace-version.inc
 KMODVER ?= "${DACE_KERNEL_VERSION}"
-# KREL del kernel: DACE_KERNEL_VERSION + EXTRAVERSION del vendorkernel
-# (5.15.144 + -g7f9d6c16b5cd-ab151). La carpeta /lib/modules/<KREL> del
-# workdir del kernel usa este nombre, no el DACE_KERNEL_VERSION pelado.
+# Kernel KREL: DACE_KERNEL_VERSION + EXTRAVERSION of the vendorkernel
+# (5.15.144 + -g7f9d6c16b5cd-ab151). The kernel workdir's /lib/modules/<KREL>
+# folder uses this name, not the bare DACE_KERNEL_VERSION.
 DACE_KREL ?= "${DACE_KERNEL_VERSION}-g7f9d6c16b5cd-ab151"
 # linux-dace's workdir uses ${MACHINE}${TARGET_VENDOR}-${TARGET_OS}
 # (= dace-oe-linux-gnueabi). do_install drops .ko's into package/.
@@ -90,11 +91,11 @@ LINUX_DACE_SYMVERS ?= "${LINUX_DACE_WORKDIR}/build/Module.symvers"
 LINUX_DACE_MODULES_IPK ?= "${DEPLOY_DIR_IPK}/armv7vehf-neon/linux-dace-modules_${KMODVER}-r0_armv7vehf-neon.ipk"
 
 # ─── mkbootimg v4 geometry ───
-# BASE 0: el ABL del T5 espera load addresses ABSOLUTAS pequeñas
+# BASE 0: the T5 ABL expects SMALL ABSOLUTE load addresses
 # (kernel_load_addr=0x8000, ramdisk=0x1000000, dtb=0x1f00000, tags=0x100),
-# NO base+offset (0x10000000+0x8000=0x10008000). Con base!=0 el vendor_boot
-# es rechazado -> EDL 05c6:900e directo. Igual que los lotes ticwatch que
-# arrancaban (AGENTS.md: "base 0, NO 0x10000000").
+# NOT base+offset (0x10000000+0x8000=0x10008000). With base!=0 the vendor_boot
+# is rejected -> direct EDL 05c6:900e. Same as the ticwatch batches that used
+# to boot ("base 0, NOT 0x10000000").
 MKBOOTIMG_BASE          ?= "0x0"
 MKBOOTIMG_KERNEL_OFFSET ?= "0x00008000"
 MKBOOTIMG_RAMDISK_OFFSET ?= "0x01000000"
@@ -155,73 +156,73 @@ do_compile() {
     find ${WORKDIR}/vkb_ramdisk -name "*.ko" -exec "$LLVM_STRIP" --strip-debug {} \;
     bbnote "stripped debug info from aarch64 kernel modules"
 
-    # ─── Step 3: DTB blob T5 = 2 DTBs CONCATENADOS (monaco-real + monacop). ───
-    # El ABL selecciona el DTB por msm-id/board-id del hardware: monaco-real
-    # (qcom,monaco, msm-id 486) + monacop (qcom,monacop, msm-id 517). Sin el
-    # que coincide (monacop) cae a EDL 05c6:900e (confirmado 22-08-2026 en la
-    # receta ticwatch). vkb-base.dtb (aurora) ya no se usa.
-    # monaco-real ya trae ramoops@9ff00000 y splash_region — no inyectar.
-    # VIA1 V67-fix: forzar dr_mode=peripheral en el hijo dwc3@4e00000. Con
-    # "otg" el core espera la decisión de rol del glue (extcon/io-channels del
-    # charger); sin charger/EUD no hay cable → el dwc3 nunca sale al bus y el
-    # host no enumera (f_fs lee descriptores pero no hay señal USB física).
-    # peripheral = gadget directo, sin esperar extcon → la UDC sale al bus.
+    # ─── Step 3: T5 DTB blob = 2 CONCATENATED DTBs (monaco-real + monacop). ───
+    # The ABL selects the DTB by the hardware msm-id/board-id: monaco-real
+    # (qcom,monaco, msm-id 486) + monacop (qcom,monacop, msm-id 517). Without the
+    # matching one (monacop) it falls to EDL 05c6:900e (confirmed 2026-08-22 in
+    # the ticwatch recipe). vkb-base.dtb (aurora) is no longer used.
+    # monaco-real already carries ramoops@9ff00000 and splash_region — do not inject.
+    # VIA1 V67-fix: force dr_mode=peripheral on the dwc3@4e00000 child. With
+    # "otg" the core waits for the glue's role decision (extcon/io-channels of
+    # the charger); without charger/EUD there is no cable -> the dwc3 never goes
+    # out to the bus and the host does not enumerate (f_fs reads descriptors but
+    # there is no physical USB signal). peripheral = direct gadget, without
+    # waiting for extcon -> the UDC goes out to the bus.
     FDTPUT=$(find ${STAGING_BINDIR_NATIVE} -name fdtput 2>/dev/null | head -1)
     [ -n "$FDTPUT" ] || FDTPUT=$(command -v fdtput)
-    test -n "$FDTPUT" || bbfatal "fdtput no encontrado (dtc-native)"
+    test -n "$FDTPUT" || bbfatal "fdtput not found (dtc-native)"
     FDTGET=$(find ${STAGING_BINDIR_NATIVE} -name fdtget 2>/dev/null | head -1)
     [ -n "$FDTGET" ] || FDTGET=$(command -v fdtget)
-    test -n "$FDTGET" || bbfatal "fdtget no encontrado (dtc-native)"
+    test -n "$FDTGET" || bbfatal "fdtget not found (dtc-native)"
     FDTOVERLAY="${STAGING_BINDIR_NATIVE}/fdtoverlay"
-    test -n "$FDTOVERLAY" || bbfatal "fdtoverlay no encontrado (dtc-native)"
+    test -n "$FDTOVERLAY" || bbfatal "fdtoverlay not found (dtc-native)"
     for dtb in monaco-real monacop; do
         cp ${S}/static/${dtb}.dtb ${WORKDIR}/${dtb}-per.dtb
-        # ruta del hijo dwc3: /soc/hsusb@4e00000/dwc3@4e00000 (del dts)
+        # dwc3 child path: /soc/hsusb@4e00000/dwc3@4e00000 (from the dts)
         "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb \
             /soc/hsusb@4e00000/dwc3@4e00000 dr_mode peripheral
-        # VIA1: activar el eMMC (sdhc_1). En el stock DT viene disabled — Wear
-        # OS lo activa via dtbo overlay del board; nuestro boot no aplica esos
-        # overlays. Activa + supplies (phandles ya verificados: L25A=0x132,
-        # L15A=0x182 en AMBOS dtbs). Supplies = pm5100_l25 (3.08V, del idp dtsi)
-        # y pm5100_l15 (1.8V io). Sin esto sdhci queda deferred sin mmcblk0*.
+        # VIA1: enable the eMMC (sdhc_1). In the stock DT it comes disabled — Wear
+        # OS enables it via the board dtbo overlay; our boot does not apply those
+        # overlays. Enable + supplies (phandles already verified: L25A=0x132,
+        # L15A=0x182 in BOTH dtbs). Supplies = pm5100_l25 (3.08V, from the idp dtsi)
+        # and pm5100_l15 (1.8V io). Without this sdhci stays deferred with no mmcblk0*.
         "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb /soc/sdhci@4744000 status ok
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/sdhci@4744000 vdd-supply 0x132
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/sdhci@4744000 vdd-io-supply 0x182
-        # VIA1b: sin OPP table para el sdhci — la OPP requiere paths ICC
-        # (required-opps) y sin qnoc los paths quedan vacíos -> _opp_add_static_v2
-        # falla (-22 'opp key field not found') y el probe aborta. Sin OPP el
-        # sdhci corre con los clocks fijos del ABL (devfreq opcional).
+        # VIA1b: no OPP table for the sdhci — the OPP requires ICC paths
+        # (required-opps) and without qnoc the paths are empty -> _opp_add_static_v2
+        # fails (-22 'opp key field not found') and the probe aborts. Without OPP the
+        # sdhci runs with the fixed ABL clocks (devfreq optional).
         "$FDTPUT" -d ${WORKDIR}/${dtb}-per.dtb /soc/sdhci@4744000 operating-points-v2
-        # TACTIL: el nodo del T5 se llama "zinitix_ts@20" con
-        # compatible = "zinitix,zinitix-ts", pero el driver del kernel
-        # (drivers/input/touchscreen/zinitix.c) solo acepta "zinitix,bt541"
-        # -> el driver no se enlazaba y NO existia /dev/input/eventX de tactil
-        # (el compositor arrancaba con evdevtouch:/dev/input/event2, que no
-        # existe; el unico input eran gpio-keys y qpnp_pon).
-        # El nodo declara zinitix,pname="SM-G5308W" con x/y_resolution=0x1d1
-        # (465, la del panel), o sea que es un BT541 rebautizado: se anade el
-        # compatible que espera el driver DEJANDO tambien el original.
+        # TOUCH: the T5 node is called "zinitix_ts@20" with
+        # compatible = "zinitix,zinitix-ts", but the kernel driver
+        # (drivers/input/touchscreen/zinitix.c) only accepts "zinitix,bt541"
+        # -> the driver did not bind and there was NO /dev/input/eventX for touch
+        # (the compositor started with evdevtouch:/dev/input/event2, which did not
+        # exist; the only inputs were gpio-keys and qpnp_pon).
+        # The node declares zinitix,pname="SM-G5308W" with x/y_resolution=0x1d1
+        # (465, the panel's), i.e. it is a rebadged BT541: the compatible the
+        # driver expects is added while ALSO keeping the original.
         "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb \
             /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
             compatible "zinitix,zinitix-ts" "zinitix,bt541"
-        # REGULADORES DEL TACTIL. El nodo del T5 declara tres rieles del PMIC
-        # (vdd=0x84, vdd-v1=0x83, vcc_i2c=0x85) y el driver del vendor los
-        # enciende los tres. El mainline solo pedia "vdd"+"vddo" (bulk get, que
-        # FALLA si falta una propiedad) y con solo esos dos el chip NO contesta
-        # a su direccion i2c:
+        # TOUCH REGULATORS. The T5 node declares three PMIC rails
+        # (vdd=0x84, vdd-v1=0x83, vcc_i2c=0x85) and the vendor driver turns all
+        # three on. The mainline only asked for "vdd"+"vddo" (bulk get, which
+        # FAILS if a property is missing) and with only those two the chip does
+        # NOT answer at its i2c address:
         #   zinitix_start: "Error while sending power-on sequence: -107"
-        #   (-107 = -ENOTCONN = I2C_ADDR_NACK, en drivers/i2c/busses/i2c-msm-geni.c)
-        # El "vddo" del Zinitix es su rail de I/O, que aqui es "vcc_i2c" (0x85):
-        # se crea la propiedad vddo-supply apuntando ahi. Y el driver va
-        # parcheado para pedir tambien "vdd-v1" (0x83), de forma que quedan
-        # encendidos los TRES rieles.
+        #   (-107 = -ENOTCONN = I2C_ADDR_NACK, in drivers/i2c/busses/i2c-msm-geni.c)
+        # The Zinitix "vddo" is its I/O rail, which here is "vcc_i2c" (0x85):
+        # the vddo-supply property is created pointing there. And the driver is
+        # patched to also request "vdd-v1" (0x83), so that all THREE rails are on.
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb \
             /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
             vddo-supply 0x85
-        # zinitix_init_input_dev() llama a touchscreen_parse_properties(), que
-        # exige las props ESTANDAR touchscreen-size-x/y; el DT del T5 solo trae
-        # las del vendor (zinitix,x_resolution/y_resolution = 0x1d1 = 465, que es
-        # justo la resolucion del panel). Sin esto:
+        # zinitix_init_input_dev() calls touchscreen_parse_properties(), which
+        # requires the STANDARD touchscreen-size-x/y props; the T5 DT only has
+        # the vendor ones (zinitix,x_resolution/y_resolution = 0x1d1 = 465, which is
+        # exactly the panel resolution). Without this:
         #   "Touchscreen-size-x and/or touchscreen-size-y not set in dts"
         #   probe failed with error -22
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb \
@@ -230,80 +231,80 @@ do_compile() {
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb \
             /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
             touchscreen-size-y 0x1d1
-        # reset-gpios (propiedad ESTANDAR): el DT del T5 solo trae la del vendor
-        # (zinitix,reset-gpio = <0x69 0x0c 0x00> = gpio 12 del TLMM). El driver
-        # parcheado la pide con devm_gpiod_get_optional(..., "reset", ...) y
-        # pulsa el reset al arrancar el chip (sin eso respondia por i2c pero no
-        # reportaba toques). Flag 1 = GPIO_ACTIVE_LOW (lo normal en un reset).
+        # reset-gpios (STANDARD property): the T5 DT only has the vendor one
+        # (zinitix,reset-gpio = <0x69 0x0c 0x00> = TLMM gpio 12). The patched
+        # driver requests it with devm_gpiod_get_optional(..., "reset", ...) and
+        # pulses the reset when starting the chip (without it the chip answered
+        # over i2c but did not report touches). Flag 1 = GPIO_ACTIVE_LOW (normal
+        # for a reset).
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb \
             /soc/qcom,qupv3_0_geni_se@4ac0000/i2c@4a84000/zinitix_ts@20 \
             reset-gpios 0x69 0x0c 0x1
-        # ── OVERLAY DE NUESTRA VARIANTE (Monaco IDP V1.0, board 0x10022) ────
-        # Cada variante del SoC tiene su overlay en el dtbo (WDP -> Raydium,
-        # IDP -> Zinitix...). El ABL los aplica por board-id, pero el del
-        # reloj (0x10022) NO se aplica (se comprobo en vivo: el nodo del
-        # tactil no recibe la propiedad 'panel' que anade el overlay). Aqui se
-        # aplica a mano con fdtoverlay: el de IDP V1.0 anade al zinitix_ts@20
-        # el enlace con el panel (panel = <&dsi_rm69090_amoled_cmd>), que es
-        # lo que el driver del vendor usa para encender el chip.
+        # ── OVERLAY FOR OUR VARIANT (Monaco IDP V1.0, board 0x10022) ────
+        # Each SoC variant has its overlay in the dtbo (WDP -> Raydium,
+        # IDP -> Zinitix...). The ABL applies them by board-id, but the watch's
+        # (0x10022) is NOT applied (verified live: the touch node does not receive
+        # the 'panel' property that the overlay adds). Here it is applied by hand
+        # with fdtoverlay: the IDP V1.0 one adds to zinitix_ts@20 the link with
+        # the panel (panel = <&dsi_rm69090_amoled_cmd>), which is what the vendor
+        # driver uses to power on the chip.
         if [ -f ${S}/static/monaco-idp-v1-overlay.dtbo ]; then
             ${FDTOVERLAY} -i ${WORKDIR}/${dtb}-per.dtb \
                 -o ${WORKDIR}/${dtb}-ovl.dtb \
                 ${S}/static/monaco-idp-v1-overlay.dtbo \
                 && mv ${WORKDIR}/${dtb}-ovl.dtb ${WORKDIR}/${dtb}-per.dtb \
-                && bbnote "$dtb: overlay Monaco IDP V1.0 (board 0x10022) aplicado"
+                && bbnote "$dtb: overlay Monaco IDP V1.0 (board 0x10022) applied"
         else
-            bbwarn "$dtb: falta monaco-idp-v1-overlay.dtbo"
+            bbwarn "$dtb: missing monaco-idp-v1-overlay.dtbo"
         fi
-        # ── EXPERIMENTO WLAN (26-09-2026): icnss estilo aurora ────────────────
-        # PLAN-WLAN.md §6-§8: la UNICA diferencia de fondo con aurora (que
-        # tiene WiFi) es que en dace la RF del WLAN vive en el MCU slate
-        # (`qcom,is_slate_rfa=1`, `rf_subtype=0`), mientras que en aurora esta
-        # en el modem (`rf_subtype=1`/APACHE, sin `is_slate_rfa`). El firmware
-        # del modem muere con DOG sin que arranque su WLAN PD (no registra
-        # `wlan/fw` en el servloc). Hipotesis: el WLAN PD se atasca esperando
-        # la RF del slate. Este experimento hace que el icnss de dace se vea
-        # como el de aurora:
-        #   - borra `qcom,is_slate_rfa` (con `fdtput -d`; OJO: no vale ponerlo
-        #     a 0 -- `of_property_read_bool` solo mira si EXISTE)
-        #   - pone `qcom,rf_subtype = <1>` (WLFW_WLAN_RF_APACHE_V01)
-        # Asi icnss2 no se bloquea esperando el SSR de `slatefw` y pide la RF
-        # APACHE. Si el DOG desaparece y aparece `wlan0`, queda confirmado el
-        # acoplamiento modem<->slate. REVERTIR el experimento = borrar estas 2
-        # lineas. Ver PLAN-WLAN.md.
+        # ── WLAN EXPERIMENT (2026-09-26): aurora-style icnss ─────────────────
+        # The ONLY deep difference from aurora (which has
+        # WiFi) is that on dace the WLAN RF lives in the slate MCU
+        # (`qcom,is_slate_rfa=1`, `rf_subtype=0`), while on aurora it lives in
+        # the modem (`rf_subtype=1`/APACHE, no `is_slate_rfa`). The modem firmware
+        # dies with DOG without its WLAN PD starting (it does not register
+        # `wlan/fw` in the servloc). Hypothesis: the WLAN PD gets stuck waiting
+        # for the slate RF. This experiment makes dace's icnss look like aurora's:
+        #   - deletes `qcom,is_slate_rfa` (with `fdtput -d`; NOTE: setting it to
+        #     0 does not work -- `of_property_read_bool` only checks if it EXISTS)
+        #   - sets `qcom,rf_subtype = <1>` (WLFW_WLAN_RF_APACHE_V01)
+        # This way icnss2 does not block waiting for the `slatefw` SSR and asks
+        # for the APACHE RF. If the DOG disappears and `wlan0` appears, the
+        # modem<->slate coupling is confirmed. REVERT the experiment = delete
+        # these 2 lines.
         "$FDTPUT" -d ${WORKDIR}/${dtb}-per.dtb /soc/qcom,icnss@C800000 \
             qcom,is_slate_rfa
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/qcom,icnss@C800000 \
             qcom,rf_subtype 1
-        bbnote "$dtb: WLAN experimento -- icnss sin is_slate_rfa + rf_subtype=1 (APACHE)"
-        # ── ENERGÍA / CARGA: se CONSERVA `dpdm-supply` del smblite ───────────
-        # El smblite usa `dpdm-supply = <&usb2_phy0>` (hsphy@1613000, phandle
-        # 0x30) para habilitar el regulador DPDM que registra phy-msm-snps-hs:
-        # pone el PHY en modo "non-driving" para que el PMIC complete la
-        # deteccion de cargador (BC1.2/APSD). Sin DPDM, POWER_PATH_STATUS no
-        # tiene USE_USBIN -> `usb/online=0` -> ICL 2 mA -> **el reloj no carga**
-        # (medido 25-09-2026: la carga funcionaba en bootloader pero no en
-        # Linux). Antes se borraba esta propiedad porque el probe del smblite
-        # se colgaba en smblite_lib_request_dpdm(); ahora el driver del PHY ya
-        # lleva el parche "dace B: sin control de LDOs" (msm_hsphy_enable_power
-        # sale sin tocar reguladores si faltan) y el regulador DPDM esta
-        # registrado (regulator.56: hsphy@1613000), asi que se prueba otra vez.
-        # Reversible: si volviera a colgarse, restaurar el `fdtput -d`.
-        bbnote "$dtb: smblite CONSERVA dpdm-supply (deteccion de cargador DPDM)"
-        # ── BT/WCN3988: el compatible decide el SOC en el HAL; los rieles, si hay chip ─
-        # 1) COMPATIBLE: el HAL lee el PRIMERO y de ahi saca el tipo de SOC
-        #    ("Soc version recevied : qcom,qcc5100" -> **slate**). Con
-        #    "qcom,wcn3990" primero elige **cherokee** (ruta UART del AP, chip
-        #    mudo). Se deja qcc5100 PRIMERO y wcn3990 como segundo: los drivers
-        #    del kernel (btpower/btqca) matchean por CUALQUIER compatible de la
-        #    lista, asi que ese segundo les sirve para sus tablas.
-        # 2) RIELES: medido 20-09-2026 -- con soc=slate el HAL NO vota
-        #    reguladores ("FOR SLATE not voting any Regulators") y sin estos
-        #    supplies `btpower` no sabe que rieles encender: pm5100_l13 (core
-        #    1.304V) y pm5100_l17 (IO 1.8V) quedaban en state=disabled y el
-        #    chip estaba **SIN ALIMENTAR** -> no contestaba al handshake
-        #    (abre ttyHS0 a 2400 bps y muere con InitTimeOut + err 0x55).
-        #    Valores del DTSI stock monaco-standalone-idp-v1.dtsi:
+        bbnote "$dtb: WLAN experiment -- icnss without is_slate_rfa + rf_subtype=1 (APACHE)"
+        # ── POWER / CHARGING: `dpdm-supply` from smblite is KEPT ────────────
+        # The smblite uses `dpdm-supply = <&usb2_phy0>` (hsphy@1613000, phandle
+        # 0x30) to enable the DPDM regulator registered by phy-msm-snps-hs:
+        # it puts the PHY in "non-driving" mode so the PMIC completes the
+        # charger detection (BC1.2/APSD). Without DPDM, POWER_PATH_STATUS has no
+        # USE_USBIN -> `usb/online=0` -> ICL 2 mA -> **the watch does not
+        # charge** (measured 2026-09-25: charging worked in the bootloader but
+        # not in Linux). This property used to be deleted because the smblite
+        # probe hung in smblite_lib_request_dpdm(); now the PHY driver already
+        # carries the "dace B: no LDO control" patch (msm_hsphy_enable_power
+        # returns without touching regulators if they are missing) and the DPDM
+        # regulator is registered (regulator.56: hsphy@1613000), so it is tried
+        # again. Reversible: if it hung again, restore the `fdtput -d`.
+        bbnote "$dtb: smblite KEEPS dpdm-supply (DPDM charger detection)"
+        # ── BT/WCN3988: the compatible decides the SOC in the HAL; the rails, if there is a chip ─
+        # 1) COMPATIBLE: the HAL reads the FIRST one and derives the SOC type
+        #    from it ("Soc version recevied : qcom,qcc5100" -> **slate**). With
+        #    "qcom,wcn3990" first it picks **cherokee** (AP UART path, mute chip).
+        #    qcc5100 is left FIRST and wcn3990 as second: the kernel drivers
+        #    (btpower/btqca) match on ANY compatible in the list, so that second
+        #    one serves their tables.
+        # 2) RAILS: measured 2026-09-20 -- with soc=slate the HAL does NOT vote
+        #    regulators ("FOR SLATE not voting any Regulators") and without these
+        #    supplies `btpower` does not know which rails to turn on: pm5100_l13
+        #    (core 1.304V) and pm5100_l17 (IO 1.8V) stayed at state=disabled and
+        #    the chip was **UNPOWERED** -> it did not answer the handshake
+        #    (opens ttyHS0 at 2400 bps and dies with InitTimeOut + err 0x55).
+        #    Values from the stock DTSI monaco-standalone-idp-v1.dtsi:
         #    IO=L17A(0x184), core/RFA=L13A(0x181), PA/CH0=L26A(0x84), XO=L14A(0x131).
         "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
             compatible "qcom,qcc5100" "qcom,wcn3990"
@@ -315,40 +316,40 @@ do_compile() {
             qcom,bt-vdd-pa-supply 0x84
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
             qcom,bt-vdd-xtal-supply 0x131
-        bbnote "$dtb: BT compatible qcc5100-first (=SOC slate) + rieles io/core/pa/xtal"
+        bbnote "$dtb: BT compatible qcc5100-first (=SOC slate) + io/core/pa/xtal rails"
         # ─ BT reset/enable: qcom,bt-sw-ctrl-gpio ────────────────────────────
-        # El stock lo trae pero COMENTADO (monaco-standalone-idp-v1.dtsi:
-        # //qcom,bt-sw-ctrl-gpio = <&tlmm 69 GPIO_ACTIVE_HIGH>). El HAL pide
-        # BT_CMD_CHECK_SW_CTRL y btpower no tiene el gpio -> EINVAL
-        # ('CheckSwCtrl: ioctl failed'). Se a~nade como en el resto de targets
-        # Qualcomm (tlmm 69 high). El phandle del controlador se lee del propio
-        # dtb (aqui es 0x69, no se hardcodea).
+        # Stock ships it but COMMENTED OUT (monaco-standalone-idp-v1.dtsi:
+        # //qcom,bt-sw-ctrl-gpio = <&tlmm 69 GPIO_ACTIVE_HIGH>). The HAL asks
+        # BT_CMD_CHECK_SW_CTRL and btpower has no gpio -> EINVAL
+        # ('CheckSwCtrl: ioctl failed'). It is added like on the rest of
+        # Qualcomm targets (tlmm 69 high). The controller phandle is read from
+        # the dtb itself (here it is 0x69, not hardcoded).
         TLMM=$("$FDTGET" -t x ${WORKDIR}/${dtb}-per.dtb /soc/pinctrl@500000 phandle)
         "$FDTPUT" -t x ${WORKDIR}/${dtb}-per.dtb /soc/bt_wcn3990 \
             qcom,bt-sw-ctrl-gpio "$TLMM" 69 0
         bbnote "$dtb: bt-sw-ctrl-gpio = <&tlmm 69 0> (tlmm phandle=$TLMM)"
-        # ── BT UART pinctrl: parche en el DRIVER (no hog en el DT) ──────────
-        # El nodo UART se deja EXACTAMENTE como el stock/aurora. Comprobado
-        # 19-09-2026: (a) los grupos qupv3_se5_* son identicos a aurora y la
-        # asignacion pinctrl-N tambien; (b) el hack 23259b2d (default/sleep =
-        # qup05) NO muxea (los pines 26-29 siguen en function=gpio durante todo
-        # el intento del HAL); (c) un HOG en /soc/pinctrl@500000 SI muxea a
-        # qup05 pero RECLAMA los pines y rompe el probe del UART (msm_geni_serial
-        # carga con 0 puertos: no aparece /dev/ttyHS*).
-        # La solucion es forzar el mux desde el propio driver en
-        # msm_geni_serial_probe() -> dace-hs-uart-pinctrl.patch (en linux-dace).
-        bbnote "$dtb: BT UART pinctrl lo fuerza el driver (dace-hs-uart-pinctrl.patch)"
-        # ── /cont-splash-fb → /dev/fb0 sobre el continuous-splash ──────────
-        # AURORA-STYLE (Step 3b de aurora-boot-images.bb): el bootloader pinta
-        # el logo en splash_region@0x5c000000 (label cont_splash_region) y el
-        # SDE sigue escaneando ESA region hasta que el composer arranca. El
-        # driver qcom-cont-splash-fb (CONFIG_FB_QCOM_CONT_SPLASH=y, ya en
-        # nuestro kernel con 0001-video-fbdev-...) la expone como /dev/fb0,
-        # pero SOLO si el nodo DT existe: aurora lo inyecta en su boot-images y
-        # nosotros no lo teniamos.
-        # Doble uso: (a) telemetria del bring-up (el panel conserva el ultimo
-        # color pintado tras un cuelgue = unico canal cuando no hay USB), y
-        # (b) splash de usuario (psplash) si algun dia hace falta.
+        # ── BT UART pinctrl: patched in the DRIVER (no hog in the DT) ───────
+        # The UART node is left EXACTLY like stock/aurora. Verified 2026-09-19:
+        # (a) the qupv3_se5_* groups are identical to aurora and the pinctrl-N
+        # assignment too; (b) the 23259b2d hack (default/sleep = qup05) does NOT
+        # mux (pins 26-29 stay at function=gpio during the whole HAL attempt);
+        # (c) a HOG on /soc/pinctrl@500000 DOES mux to qup05 but CLAIMS the pins
+        # and breaks the UART probe (msm_geni_serial loads with 0 ports:
+        # /dev/ttyHS* never appears).
+        # The solution is to force the mux from the driver itself in
+        # msm_geni_serial_probe() -> dace-hs-uart-pinctrl.patch (in linux-dace).
+        bbnote "$dtb: BT UART pinctrl is forced by the driver (dace-hs-uart-pinctrl.patch)"
+        # ── /cont-splash-fb → /dev/fb0 over the continuous-splash ──────────
+        # AURORA-STYLE (Step 3b of aurora-boot-images.bb): the bootloader paints
+        # the logo in splash_region@0x5c000000 (label cont_splash_region) and the
+        # SDE keeps scanning THAT region until the composer starts. The
+        # qcom-cont-splash-fb driver (CONFIG_FB_QCOM_CONT_SPLASH=y, already in our
+        # kernel with 0001-video-fbdev-...) exposes it as /dev/fb0, but ONLY if
+        # the DT node exists: aurora injects it in its boot-images and we did not
+        # have it.
+        # Double use: (a) bring-up telemetry (the panel keeps the last color
+        # painted after a hang = the only channel when there is no USB), and
+        # (b) user splash (psplash) if ever needed.
         # Panel = 466x466 (rm69090-amoled-178-cmd), xRGB8888, stride 466*4.
         S_NODE=/cont-splash-fb
         "$FDTPUT" -c ${WORKDIR}/${dtb}-per.dtb "$S_NODE"
@@ -358,16 +359,16 @@ do_compile() {
         "$FDTPUT" -t u ${WORKDIR}/${dtb}-per.dtb "$S_NODE" height 466
         "$FDTPUT" -t u ${WORKDIR}/${dtb}-per.dtb "$S_NODE" stride 1864
         "$FDTPUT" -t s ${WORKDIR}/${dtb}-per.dtb "$S_NODE" format "x8r8g8b8"
-        bbnote "$dtb: nodo /cont-splash-fb inyectado (fb0 = splash 0x5c000000, 466x466)"
-        bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, sin OPP) + RAYDIUM rm32380 @0x39 (i2c-1) + zinitix disabled + BT rieles"
+        bbnote "$dtb: /cont-splash-fb node injected (fb0 = splash 0x5c000000, 466x466)"
+        bbnote "$dtb: dr_mode=peripheral + sdhc_1 ok (vdd=l25/l15, without OPP) + RAYDIUM rm32380 @0x39 (i2c-1) + zinitix disabled + BT rails"
     done
     cat ${WORKDIR}/monaco-real-per.dtb ${WORKDIR}/monacop-per.dtb > ${WORKDIR}/dtb-blob-vendor.bin
     bbnote "DTB blob vendor_boot: $(stat -c%s ${WORKDIR}/dtb-blob-vendor.bin) bytes (stock=572016)"
 
-    # ─── Step 4: cpio + gzip del ramdisk ───
-    # dace-vkb-assemble.py ya dejó vkb_ramdisk/lib/modules/*.ko planos +
-    # modules.dep (rutas absolutas) + modules.load(.recovery). Solo empaquetar
-    # en cpio+gzip (formato del vendor_boot stock T5: gzip -> cpio-newc). ───
+    # ─── Step 4: ramdisk cpio + gzip ───
+    # dace-vkb-assemble.py already left vkb_ramdisk/lib/modules/*.ko flat +
+    # modules.dep (absolute paths) + modules.load(.recovery). Only pack into
+    # cpio+gzip (T5 stock vendor_boot format: gzip -> cpio-newc). ───
     ( cd ${WORKDIR}/vkb_ramdisk && find . | sort | \
         cpio -o -H newc --owner root:root 2>/dev/null ) > ${WORKDIR}/vkb_rd.cpio
     gzip -9 -c ${WORKDIR}/vkb_rd.cpio > ${WORKDIR}/vkb_rd.gz
@@ -375,47 +376,49 @@ do_compile() {
     MKBOOTIMG=${STAGING_BINDIR_NATIVE}/mkbootimg
 
     # ─── Step 5: mkbootimg vendor_kernel_boot.img (v4) ───
-    # Replica la receta ticwatch (que arranca): --base 0, cmdline stock
-    # completa (con bootconfig Y fw_devlink), --vendor_bootconfig por archivo,
-    # (debug-ramdisk quitado: el init.sh dace lo soporta, pero el lote normal
-    #  debe hacer switch_root; para depurar usar /sdcard/debug-ramfs o el lote dbg)
-    # a switch_root, que falla sin rootfs en el T5 -> EDL tras ~15s).
+    # Replicates the ticwatch recipe (which boots): --base 0, full stock cmdline
+    # (with bootconfig AND fw_devlink), --vendor_bootconfig per file,
+    # (debug-ramdisk removed: dace's init.sh supports it, but the normal batch
+    #  must switch_root; to debug use /sdcard/debug-ramfs or the dbg batch)
+    # to switch_root, which fails without a rootfs on the T5 -> EDL after ~15s).
     #
-    # OJO: 'dace.debug=1' al final del --vendor_cmdline es FASE DE BRING-UP.
-    # Activa el modo de depuracion del init.sh (/sdcard/dace-mode, AGENTS §12):
-    # SIN ese fichero el arranque por defecto es el RAMFS con adb (modo SEGURO)
-    # y NO el rootfs. Para un arranque "de produccion" (que el reloj levante el
-    # rootfs solo) hay que QUITARLO de aqui. Tiene que ir en el vendor_cmdline:
-    # se probo en el bootconfig del vendor_boot y NO llega a /proc/cmdline.
-    # msm_geni_serial.dace_hs_uart_fifo=0 (21-09-2026): DESACTIVA el workaround
-    # FIFO del HS UART. Ese workaround (dace-hs-uart-fifo.patch) era para que el
-    # SE-DMA no se llevara un RX_SBE y reseteara el SoC, porque el wrapper QUP
-    # (4ac0000) se quedaba SIN dominio IOMMU. Eso ya lo arregla
-    # dace-iommu-defer.patch (el wrapper/GPI ya tienen iommu_group y su DMA
-    # funciona: es lo que hace que el SPI del slate levante el MCU sin reset).
-    # Con FIFO forzado la TX del SE NO FUNCIONA: medido con el loopback interno
-    # del driver (TX_RX y CTSRFR_TXRX) -> 0 bytes, y por eso el HAL moria en
-    # InitTimeOut y el hci_qca del kernel en "command 0xfc00 tx timeout": el chip
-    # no recibia NADA (aunque estaba vivo: el stock lo anunciaba por BLE).
-    # La rama FIFO de port_setup ademas NO hace la config que si hace la DMA
-    # (geni_se_config_packing + SE_GENI_CFG_REG80). El stock usa DMA y funciona.
+    # NOTE: 'dace.debug=1' at the end of --vendor_cmdline is the BRING-UP PHASE.
+    # It enables the init.sh debug mode (/sdcard/dace-mode):
+    # WITHOUT that file the default boot is the RAMFS with adb (SAFE mode)
+    # and NOT the rootfs. For a "production" boot (the watch bringing up the
+    # rootfs on its own) it must be REMOVED from here. It has to go in the
+    # vendor_cmdline: it was tried in the vendor_boot bootconfig and it does not
+    # reach /proc/cmdline.
+    # msm_geni_serial.dace_hs_uart_fifo=0 (2026-09-21): DISABLES the HS UART
+    # FIFO workaround. That workaround (dace-hs-uart-fifo.patch) existed so the
+    # SE-DMA would not take an RX_SBE and reset the SoC, because the QUP wrapper
+    # (4ac0000) was left WITHOUT an IOMMU domain. That is now fixed by
+    # dace-iommu-defer.patch (the wrapper/GPI already have an iommu_group and
+    # their DMA works: it is what makes the slate SPI bring up the MCU without a
+    # reset). With FIFO forced the SE TX does NOT WORK: measured with the driver's
+    # internal loopback (TX_RX and CTSRFR_TXRX) -> 0 bytes, and that is why the
+    # HAL died in InitTimeOut and the kernel hci_qca in "command 0xfc00 tx
+    # timeout": the chip received NOTHING (even though it was alive: stock was
+    # advertising it over BLE). The FIFO branch of port_setup also does NOT do
+    # the config that the DMA one does (geni_se_config_packing +
+    # SE_GENI_CFG_REG80). Stock uses DMA and works.
     #
-    # blob de 2 DTBs. Sin el monacop el ABL cae a EDL.
+    # blob of 2 DTBs. Without monacop the ABL falls to EDL.
     #
-    # NI deferred_probe_timeout NI arm_smmu.disable_bypass (=0): los dos se
-    # probaron el 20-09-2026 y los dos estan descartados con datos:
+    # NEITHER deferred_probe_timeout NOR arm_smmu.disable_bypass (=0): both were
+    # tried on 2026-09-20 and both are discarded with data:
     #
-    #  * deferred_probe_timeout=30: retrasa TODAS las dependencias -> la cadena
-    #    USB se queda sin UDC y setup_usb_console() no encuentra /sys/class/udc
-    #    -> SIN consola ni adb (parecia un cuelgue; el arranque seguia).
-    #  * arm_smmu.disable_bypass=0: la telemetria del SMMU demostro que el bit
-    #    sCR0.USFCFG esta BLOQUEADO POR TZ (want=0x00e01836 -> read=0x00e01c06
-    #    conserva 0x400) -> no se puede quitar; los streams no identificados
-    #    (0xe3 QUP, 0xf6 GPI) se ABORTAN siempre.
-    # El arreglo bueno es el parche del kernel dace-iommu-defer.patch: los
-    # consumers del IOMMU devuelven -EPROBE_DEFER (en vez del -ETIMEDOUT de
-    # driver_deferred_probe_check_state) y asi esperan al apps-smmu y reciben
-    # su dominio (como display/kgsl/USB, que si funcionan).
+    #  * deferred_probe_timeout=30: delays ALL dependencies -> the USB chain is
+    #    left without a UDC and setup_usb_console() finds no /sys/class/udc
+    #    -> NO console and NO adb (it looked like a hang; the boot went on).
+    #  * arm_smmu.disable_bypass=0: the SMMU telemetry proved that the
+    #    sCR0.USFCFG bit is LOCKED BY TZ (want=0x00e01836 -> read=0x00e01c06
+    #    keeps 0x400) -> it cannot be cleared; unidentified streams
+    #    (0xe3 QUP, 0xf6 GPI) are ALWAYS ABORTED.
+    # The right fix is the kernel patch dace-iommu-defer.patch: IOMMU consumers
+    # return -EPROBE_DEFER (instead of the -ETIMEDOUT from
+    # driver_deferred_probe_check_state) and thus wait for the apps-smmu and get
+    # their domain (like display/kgsl/USB, which do work).
     "${MKBOOTIMG}" \
         --header_version 4 --pagesize ${MKBOOTIMG_PAGESIZE} \
         --vendor_boot ${WORKDIR}/vendor_kernel_boot.img \

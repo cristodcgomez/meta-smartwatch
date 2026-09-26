@@ -1,14 +1,13 @@
 From: TicWatch Pro 5 port
-Subject: [PATCH] usb: dwc3: dwc3-msm: reintentar registrar el extcon del smblite
+Subject: [PATCH] usb: dwc3: dwc3-msm: retry registering the smblite extcon
 
-El dwc3 probea en el initramfs y el smblite (que aporta el extcon
-pm5100_charger con EXTCON_USB) en el rootfs. Con el parche
-dwc3-msm-force-vbus-peripheral, vbus_active queda forzado true para
-siempre -> el controlador USB nunca entra en LPM -> pm_stay_awake sin
-pm_relax -> la wakeup_source 4e00000.hsusb bloquea el autosleep.
-Aqui el dwc3 reintenta el registro del extcon (cada 1 s) y sigue
-siguiendo el estado USB del smblite, para que al desconectar se
-limpie vbus_active y el USB pueda suspender.
+The dwc3 probes in the initramfs and the smblite (which provides the
+pm5100_charger extcon with EXTCON_USB) in the rootfs. With the
+dwc3-msm-force-vbus-peripheral patch, vbus_active is forced true forever
+-> the USB controller never enters LPM -> pm_stay_awake without pm_relax ->
+the 4e00000.hsusb wakeup_source blocks autosleep. Here the dwc3 retries the
+extcon registration (every 1 s) and keeps following the smblite USB state, so
+that on disconnect vbus_active is cleared and the USB can suspend.
 Upstream-Status: Inappropriate [dace bring-up]
 ---
 
@@ -37,7 +36,7 @@ Upstream-Status: Inappropriate [dace bring-up]
 +	}
  
  	for (idx = 0; idx < extcon_cnt; idx++) {
-+		/* dace: ya registrado en una pasada anterior */
++		/* dace: already registered in a previous pass */
 +		if (mdwc->extcon[idx].edev)
 +			continue;
 +
@@ -48,9 +47,9 @@ Upstream-Status: Inappropriate [dace bring-up]
  						true, edev);
  	}
  
-+	/* dace: si algun extcon aun no existe (p.ej. el del smblite, que probea
-+	 * en el rootfs), pedir reintento. El probe lo maneja: sigue con los que
-+	 * si existen y programa un work de reintento, para no perder el USB. */
++	/* dace: if some extcon still does not exist (e.g. the smblite one, which
++	 * probes in the rootfs), ask for a retry. The probe handles it: it continues
++	 * with the ones that exist and schedules a retry work, to not lose USB. */
 +	if (deferred)
 +		return -EPROBE_DEFER;
 +
@@ -87,8 +86,8 @@ Upstream-Status: Inappropriate [dace bring-up]
 +					dwc3_msm_extcon_retry_work);
  		ret = dwc3_msm_extcon_register(mdwc);
 +		if (ret == -EPROBE_DEFER) {
-+			/* dace: el extcon del smblite aun no existe. Seguir con
-+			 * los que si (EUD) y reintentar cada segundo. */
++			/* dace: the smblite extcon still does not exist. Continue
++			 * with the ones that do (EUD) and retry every second. */
 +			schedule_delayed_work(&mdwc->extcon_retry_work,
 +						msecs_to_jiffies(1000));
 +			ret = 0;

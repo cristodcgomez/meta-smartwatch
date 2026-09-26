@@ -1,4 +1,5 @@
 #!/bin/sh
+# AI Assisted:
 # Recreate the dm-linear mappings for the TicWatch Pro 5's (monaco/SW5100)
 # stock Wear OS 13 partitions, which live inside the dynamic partition
 # "super" (/dev/mmcblk0p7, 4 GiB), and mount them so the LXC container can
@@ -28,14 +29,15 @@ if [ ! -b "$SUPER" ]; then
     exit 1
 fi
 
-# Sin metadata LP no hay Wear OS que mapear: no es un error fatal (permite
-# arrancar en un T5 con el super vacio).
-# OJO: comparar con los BYTES ("gDla"), no con od -tx4 (que los da al reves
-# en little-endian: 616c4467, no 67446c61). Con la comparacion mala el script
-# hacia exit 0 SIN CREAR NADA y el servicio parecia OK (bug real, cazado en
-# el reloj: /dev/mapper vacio y /android sin montar tras 'active (exited)').
+# Without LP metadata there is no Wear OS to map: it is not a fatal error (it
+# allows booting on a T5 with an empty super).
+# NOTE: compare with the BYTES ("gDla"), not with od -tx4 (which gives them
+# reversed in little-endian: 616c4467, not 67446c61). With the bad comparison
+# the script did exit 0 WITHOUT CREATING ANYTHING and the service looked OK
+# (real bug, caught on the watch: /dev/mapper empty and /android unmounted
+# after 'active (exited)').
 if [ "$(dd if=$SUPER bs=1 skip=4096 count=4 2>/dev/null)" != "gDla" ]; then
-    echo "dace-vendor-mount: $SUPER sin metadata LP (geometria ausente), nada que hacer"
+    echo "dace-vendor-mount: $SUPER without LP metadata (geometry missing), nothing to do"
     exit 0
 fi
 
@@ -68,8 +70,8 @@ mount_if_unmounted() {
     fi
 }
 
-# /android/* es lo que el contenedor LXC bind-montea dentro de su rootfs
-# (dace-lxc-android-start.sh hace bind de /android/vendor -> $ROOTFS/vendor).
+# /android/* is what the LXC container bind-mounts into its rootfs
+# (dace-lxc-android-start.sh binds /android/vendor -> $ROOTFS/vendor).
 mount_if_unmounted /dev/mapper/system      /android/system
 mount_if_unmounted /dev/mapper/vendor      /android/vendor
 mount_if_unmounted /dev/mapper/product     /android/product
@@ -77,32 +79,33 @@ mount_if_unmounted /dev/mapper/system_ext  /android/system_ext
 mount_if_unmounted /dev/mapper/vendor_dlkm /android/vendor_dlkm
 mount_if_unmounted /dev/mapper/system_dlkm /android/system_dlkm
 
-# Symlinks de compatibilidad: /vendor y /system son donde Halium / libhybris
-# esperan encontrar los HAL .so y las libs Android. Sin ellos, cada daemon
-# (sensorfwd, ngfd-droid-vibrator, bluebinder, el QPA hwcomposer del launcher)
-# necesitaria su propio HYBRIS_LD_LIBRARY_PATH.
+# Compatibility symlinks: /vendor and /system are where Halium / libhybris
+# expect to find the HAL .so's and the Android libs. Without them, every daemon
+# (sensorfwd, ngfd-droid-vibrator, bluebinder, the launcher's hwcomposer QPA)
+# would need its own HYBRIS_LD_LIBRARY_PATH.
 #
-#   /vendor -> /android/vendor (el vendor_b ext4 del T5)
-#   /system -> el system del CONTENEDOR (/var/lib/lxc/android/rootfs/system),
-#              NO /android/system: el system stock del T5 es un mirror ext4
-#              crudo, mientras que el del contenedor ya tiene el layout AOSP
-#              con los apex resueltos (libhardware.so, sensors*.so, ...).
+#   /vendor -> /android/vendor (the T5 vendor_b ext4)
+#   /system -> the CONTAINER's system (/var/lib/lxc/android/rootfs/system),
+#              NOT /android/system: the T5 stock system is a raw ext4 mirror,
+#              while the container's already has the AOSP layout with the apexes
+#              resolved (libhardware.so, sensors*.so, ...).
 #
-# OJO: el paquete android-system deja /system -> /usr/libexec/hal-droid/system.
-# Si existe ese symlink lo sustituimos (por eso lo comprobamos antes).
+# NOTE: the android-system package leaves /system -> /usr/libexec/hal-droid/system.
+# If that symlink exists we replace it (that is why we check it first).
 if [ -L /system ] && [ "$(readlink /system)" = "/usr/libexec/hal-droid/system" ]; then
     rm -f /system
 fi
 [ -L /vendor ] || { rm -rf /vendor 2>/dev/null; ln -sf /android/vendor /vendor; }
 [ -L /system ] || { rm -rf /system 2>/dev/null; ln -sf /var/lib/lxc/android/rootfs/system /system; }
 
-# ─ Firmware del modem/WLAN (como aurora) ────────────────────────────────
-# El firmware del subsystem modem (modem.mdt + modem.b00..b29), el del WLAN
-# (wlanmdsp.mbn) y los BDF (bdwlan.*) viven en /vendor/firmware_mnt/image, pero
-# firmware_class.path por defecto apunta a /vendor/firmware (que no llega ahi).
-# Sin el path, remoteproc-mss no encuentra modem.mdt (ENOENT) y queda offline,
-# lo que rompe WLAN (icnss espera el WLFW del modem) y BT (la init del QCA SoC
-# necesita el blob del modem). Aurora lo hace asi en su aurora-vendor-mount.sh.
+# ─ Modem/WLAN firmware (like aurora) ────────────────────────────────
+# The modem subsystem firmware (modem.mdt + modem.b00..b29), the WLAN one
+# (wlanmdsp.mbn) and the BDFs (bdwlan.*) live in /vendor/firmware_mnt/image, but
+# firmware_class.path defaults to /vendor/firmware (which does not reach there).
+# Without that path, remoteproc-mss does not find modem.mdt (ENOENT) and stays
+# offline, which breaks WLAN (icnss waits for the modem WLFW) and BT (the QCA
+# SoC init needs the modem blob). Aurora does it this way in its
+# aurora-vendor-mount.sh.
 if [ -b /dev/mmcblk0p14 ] && ! mountpoint -q /vendor/firmware_mnt 2>/dev/null; then
     mkdir -p /vendor/firmware_mnt 2>/dev/null || true
     mount -t vfat -o ro,uid=1000,gid=1000,fmask=0337,dmask=0227 \
@@ -112,9 +115,9 @@ if [ -f /vendor/firmware_mnt/image/modem.mdt ]; then
     echo /vendor/firmware_mnt/image > /sys/module/firmware_class/parameters/path && \
         echo "dace-vendor-mount: firmware_class.path -> /vendor/firmware_mnt/image"
 fi
-# Este servicio corre muy pronto (Before=local-fs.target); el adsp_loader y los
-# nodos remoteproc pueden aparecer despues. Esperar (max ~30 s) a que existan
-# para no saltarnos el arranque del ADSP/modem (le pasaba: adsp=mss=offline).
+# This service runs very early (Before=local-fs.target); adsp_loader and the
+# remoteproc nodes can appear later. Wait (max ~30 s) for them to exist so we do
+# not skip the ADSP/modem start (it happened: adsp=mss=offline).
 i=0
 while [ $i -lt 150 ] && [ ! -e /sys/kernel/boot_adsp/boot ]; do
     sleep 0.2; i=$((i+1))
@@ -126,39 +129,38 @@ while [ $i -lt 150 ] && [ ! -e /sys/class/remoteproc/remoteproc1 ]; do
     sleep 0.2; i=$((i+1))
 done
 
-# ─ Habilitar RECOVERY en los remoteproc (clave para el DOG del modem) ──────
-# qcom_q6v5_pas hard-codea rproc->recovery_disabled = true (linea 1047 del
-# source). Con recovery deshabilitado, un fatal error del firmware (p.ej. el
-# DOG "stalled initialization" del modem, que dispara a los ~40 s) NO se
-# recupera: el kernel hace panic y el SoC se resetea
-# ("rproc recovery state: disabled -> device crash"). aurora CONVIVE con los
-# crashes del modem (su propia nota: "modem perpetually crashes & recovers").
-# Habilitando recovery desde sysfs, el mismo DOG pasa a
-# "recovery state: enabled and kick recovery process" y el reloj sobrevive;
-# el modem se relanza solo. Verificado 19-09-2026: crash #1/#2 cada ~40 s con
-# el reloj estable y adb vivo (antes, reset inmediato).
+# ─ Enable RECOVERY on the remoteprocs (key for the modem DOG) ──────
+# qcom_q6v5_pas hardcodes rproc->recovery_disabled = true (line 1047 of the
+# source). With recovery disabled, a firmware fatal error (e.g. the modem DOG
+# "stalled initialization", which fires at ~40 s) is NOT recovered: the kernel
+# panics and the SoC resets ("rproc recovery state: disabled -> device crash").
+# aurora LIVES WITH the modem crashes (its own note: "modem perpetually crashes
+# & recovers"). By enabling recovery from sysfs, the same DOG becomes
+# "recovery state: enabled and kick recovery process" and the watch survives;
+# the modem relaunches itself. Verified 2026-09-19: crash #1/#2 every ~40 s with
+# the watch stable and adb alive (before: immediate reset).
 for r in /sys/class/remoteproc/remoteproc*; do
     [ -e "$r/recovery" ] || continue
     [ "$(cat "$r/recovery" 2>/dev/null)" = "enabled" ] && continue
     echo enabled > "$r/recovery" 2>/dev/null && \
         echo "dace-vendor-mount: $(basename $r) recovery -> enabled" > /dev/kmsg || true
 done
-# OJO: el modem (remoteproc1) tambien queda con recovery=enabled: el DOG de su
-# firmware (si algun dia se arranca para la WLAN) NO resetea el SoC; el driver
-# lo relanza solo (fue el fix del 19-09-2026).
+# NOTE: the modem (remoteproc1) also ends up with recovery=enabled: the DOG of
+# its firmware (if it is ever started for WLAN) does NOT reset the SoC; the
+# driver relaunches it on its own (this was the 2026-09-19 fix).
 
-# ─ Arrancar el ADSP (el fw del modem/WLAN lo espera vivo) ───────────────────
-# El MODEM (remoteproc1) ya NO se arranca aqui. En dace el WLAN necesita al
-# menos el orden: cadena qcacld/icnss2 cargada -> MCU slate UP (icnss2 usa
-# qcom,is_slate_rfa y espera el SSR de "slatefw") -> modem. Arrancarlo tan
-# temprano (antes del slate y de la cadena WLAN) solo alimentaba el crash-loop
-# `DOG detects stalled initialization`. El arranque del modem vive ahora en
-# dace-wlan.sh (gateado tras /etc/dace-kick-modem, ver PLAN-WLAN.md).
-# El fw del modem espera al ADSP vivo via tmr_slave2; sin ADSP el watchdog del
-# modem cuelga con "DOG detects stalled initialization" y se resetea en bucle.
-# OJO: monaco_adsp_resource NO tiene .auto_boot, asi que el ADSP no arranca
-# solo: hay que escribir en /sys/kernel/boot_adsp/boot (sysfs que crea
-# adsp_loader_dlkm). El contenedor tambien lo hace, pero TARDE.
+# ─ Start the ADSP (the modem/WLAN fw waits for it to be alive) ──────────────
+# The MODEM (remoteproc1) is NO LONGER started here. On dace the WLAN needs at
+# least the order: qcacld/icnss2 chain loaded -> slate MCU UP (icnss2 uses
+# qcom,is_slate_rfa and waits for the "slatefw" SSR) -> modem. Starting it that
+# early (before the slate and the WLAN chain) only fed the crash-loop
+# `DOG detects stalled initialization`. The modem start now lives in
+# dace-wlan.sh (gated behind /etc/dace-kick-modem).
+# The modem fw waits for the ADSP alive via tmr_slave2; without the ADSP the
+# modem watchdog hangs with "DOG detects stalled initialization" and resets in a
+# loop. NOTE: monaco_adsp_resource does NOT have .auto_boot, so the ADSP does not
+# start on its own: one must write to /sys/kernel/boot_adsp/boot (sysfs created
+# by adsp_loader_dlkm). The container does it too, but LATE.
 if [ -e /sys/kernel/boot_adsp/boot ] && \
    [ "$(cat /sys/class/remoteproc/remoteproc0/state 2>/dev/null)" != "running" ]; then
     echo 1 > /sys/kernel/boot_adsp/boot 2>/dev/null || true
@@ -170,9 +172,9 @@ if [ -e /sys/kernel/boot_adsp/boot ] && \
     echo "dace-vendor-mount: ADSP (remoteproc0) state=$(cat /sys/class/remoteproc/remoteproc0/state 2>/dev/null)" > /dev/kmsg || true
 fi
 
-# Vigia: durante 90 s registra en /dev/kmsg el estado de adsp/mss cada 5 s.
-# Asi el stall del modem (DOG a los ~40 s) queda fechado en la consola aunque
-# el journal se pierda en el reset.
+# Watchdog: for 90 s it logs the adsp/mss state to /dev/kmsg every 5 s. This
+# way the modem stall (DOG at ~40 s) is timestamped on the console even if the
+# journal is lost on reset.
 (
     i=0
     while [ $i -lt 18 ]; do

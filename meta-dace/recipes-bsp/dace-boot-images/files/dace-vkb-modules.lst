@@ -38,8 +38,8 @@ secure_buffer:k
 mem_buf:k
 mem_buf_dev:k
 socinfo:k
-# qcom_wdt_core / qcom_soc_wdt ya no se construyen (WQ_WATCHDOG/WDT off en
-# el fragment para el bring-up) — quitados del manifest.
+# qcom_wdt_core / qcom_soc_wdt are no longer built (WQ_WATCHDOG/WDT off in
+# the fragment for bring-up) — removed from the manifest.
 # qcom_wdt_core:k
 # qcom_soc_wdt:k
 memory_dump_v2:k
@@ -150,14 +150,14 @@ qcom-spmi-adc5-gen3:k
 qcom-vadc-common:k
 
 # ────────────────── Charger / BMS chain ──────────────────
-# qpnp-smblite-main (charger) lo construimos de fuente aurora (estable, solo
-# dep gvotable; el smblite STOCK requiere slate_events_bridge, que nuestro
-# kernel no exporta). qti-qbg-main (fuel gauge, provider IIO de chg_type/
-# usbin-* del charger) se cuelga si lo construimos de aurora; usamos el .ko
-# STOCK Mobvoi del vendor_boot T5 (:stock, sin KMI gate — CONFIG_MODULE_
-# FORCE_LOAD=y; vermagic idéntico -g7f9d6c16b5cd-ab151). Los google-bms/
-# battery/charger/sw5100_bms NO existen en el vendor_boot stock T5 (son de
-# aurora/Pixel Watch 2) y sus builds aurora cuelgan en el T5 → omitidos.
+# qpnp-smblite-main (charger) is built from aurora source (stable, only dep
+# gvotable; the STOCK smblite requires slate_events_bridge, which our kernel
+# does not export). qti-qbg-main (fuel gauge, IIO provider for the charger's
+# chg_type/usbin-*) hangs if built from aurora; we use the Mobvoi STOCK .ko
+# from the T5 vendor_boot (:stock, without KMI gate — CONFIG_MODULE_
+# FORCE_LOAD=y; identical vermagic -g7f9d6c16b5cd-ab151). The google-bms/
+# battery/charger/sw5100_bms do NOT exist in the T5 stock vendor_boot (they are
+# from aurora/Pixel Watch 2) and their aurora builds hang on the T5 → omitted.
 gvotable:tp
 logbuffer:tp
 qpnp-smblite-main:tp
@@ -203,16 +203,16 @@ heap_mem_ext_v01:k
 soc_sleep_stats:k
 subsystem_sleep_stats:k
 sysmon_subsystem_stats:k
-# power_state va STOCK (:stock, .ko de Mobvoi parcheado con patch-stock-module.py).
-# El driver de google-eos cambio el ABI de cara a userspace:
-#   stock: MODEM_EXIT=5 ADSP_EXIT=6  (sin CDSP)      PREPARE_FOR_HIBERNATION=7
+# power_state goes STOCK (:stock, Mobvoi .ko patched with patch-stock-module.py).
+# The google-eos driver changed the userspace-facing ABI:
+#   stock: MODEM_EXIT=5 ADSP_EXIT=6  (no CDSP)       PREPARE_FOR_HIBERNATION=7
 #   goog : CDSP_SUSPEND=5 MODEM_EXIT=6 ADSP_EXIT=7   PREPARE_FOR_HIBERNATION=9
-# y el peer del MCU slate es el "powerstateservice" (pss) de MOBVOI, que pide los
-# estados con el ABI STOCK: con el nuestro, su MODEM_EXIT(5) cae en CDSP_SUSPEND
-# y la maquina de estados nunca completa -> el MCU se queda sin peer y NO
-# habilita el bloque BT (medido: geni_ios:0x0 en el SE del UART = el chip no
-# maneja sus lineas, y el HAL muere con InitTimeOut). Con el .ko stock el ABI
-# coincide exacto (mismo binario que usa el pss en stock).
+# and the slate MCU's peer is MOBVOI's "powerstateservice" (pss), which requests
+# the states with the STOCK ABI: with ours, its MODEM_EXIT(5) falls on
+# CDSP_SUSPEND and the state machine never completes -> the MCU is left without a
+# peer and does NOT enable the BT block (measured: geni_ios:0x0 in the UART SE =
+# the chip does not drive its lines, and the HAL dies with InitTimeOut). With
+# the stock .ko the ABI matches exactly (the same binary the pss uses on stock).
 power_state:stock
 
 # ────────────────── ADSP audio chain (boots ADSP via /sys/kernel/boot_adsp/boot) ──────────────────

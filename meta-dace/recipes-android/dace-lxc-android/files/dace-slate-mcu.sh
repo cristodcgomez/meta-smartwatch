@@ -1,43 +1,44 @@
 #!/bin/sh
-# dace: arranca el MCU del slate (remoteproc2) para el BLUETOOTH.
+# AI Assisted:
+# dace: starts the slate MCU (remoteproc2) for BLUETOOTH.
 #
-# En el reloj, persist.vendor.qcom.bluetooth.soc=slate: el HAL de BT no habla
-# con el chip por la UART del AP, sino por el transporte MCT a traves del
-# enlace glink del MCU, y el MCU es quien alimenta/relojea el chip. Sin MCU el
-# chip esta MUDO (Get Version nunca contesta).
+# On the watch, persist.vendor.qcom.bluetooth.soc=slate: the BT HAL does not
+# talk to the chip over the AP UART, but over the MCT transport through the
+# MCU's glink link, and the MCU is what powers/clocks the chip. Without the MCU
+# the chip is MUTE (Get Version never answers).
 #
-# EL ORDEN Y EL MOMENTO IMPORTAN (medido 20-09-2026):
-#   1) los .ko del slate ya estan cargados (udev) cuando corre esto;
-#   1b) `powerstateservice-hal-1-0` (pss) tiene que estar ARRANCADO: es el peer
-#      de estado del MCU. Su .rc NO trae linea 'interface' -> ctl.start.
-#      Sin el, el MCU se queda sin quien le conteste y el SoC acaba en un Oops
-#      (salto a la direccion 0) a los pocos segundos;
-#   2) al hacer `echo start` en el rproc, el subdev SSR de qcom_rproc_slate
-#      notifica "slatefw" QCOM_SSR_AFTER_POWERUP -> slatecom_set_spi_state(
-#      SLATECOM_SPI_FREE) pide la IRQ "qcom-slate_spi" y su tasklet lee los
-#      registros de estado del MCU por SPI (el camino que abortaba el SMMU) ->
-#      levanta el enlace glink y publica slate_bt_state=ready;
-#   3) el MCU NO se arranca al principio del boot: arrancarlo a los ~23 s
-#      (mientras el contenedor levanta sus HALs) acababa en ese mismo Oops.
-#      Arrancado con el sistema ya arriba (unidad Ordered after graphical.target
-#      + margen) es estable y es cuando el HAL lo aprovecha.
+# ORDER AND TIMING MATTER (measured 2026-09-20):
+#   1) the slate .ko's are already loaded (udev) when this runs;
+#   1b) `powerstateservice-hal-1-0` (pss) must be STARTED: it is the MCU's state
+#      peer. Its .rc does NOT have an 'interface' line -> ctl.start.
+#      Without it, the MCU is left with nobody to answer it and the SoC ends in
+#      an Oops (jump to address 0) a few seconds later;
+#   2) on `echo start` in the rproc, the subdev SSR of qcom_rproc_slate
+#      notifies "slatefw" QCOM_SSR_AFTER_POWERUP -> slatecom_set_spi_state(
+#      SLATECOM_SPI_FREE) requests the "qcom-slate_spi" IRQ and its tasklet reads
+#      the MCU status registers over SPI (the path that the SMMU aborted) ->
+#      brings up the glink link and publishes slate_bt_state=ready;
+#   3) the MCU is NOT started early in the boot: starting it at ~23 s
+#      (while the container brings up its HALs) ended in that same Oops.
+#      Started with the system already up (unit Ordered after graphical.target
+#      + margin) it is stable and that is when the HAL makes use of it.
 #
-# CORONA/RSB (22-09-2026): los modulos slate_rsb + slatersb_rpmsg se cargan
-# AQUI, antes del `echo start`. Corto: el canal slate-rsb-ctl no existe hasta
-# que el MCU arranca; si slatersb_rpmsg probea con slate_rsb ausente
-# (rsb_ops=NULL) es una llamada a NULL -> oops -> panic (panic_on_oops=1) ->
-# reset (el crash documentado en AGENTS §6). Con el MCU parado el orden es el
-# unico seguro, y es el mismo que el stock (carga ambos en
-# vendor_dlkm/modules.load antes de arrancar el MCU).
+# CROWN/RSB (2026-09-22): the slate_rsb + slatersb_rpmsg modules are loaded
+# HERE, before the `echo start`. Short reason: the slate-rsb-ctl channel does
+# not exist until the MCU starts; if slatersb_rpmsg probes with slate_rsb absent
+# (rsb_ops=NULL) it is a call to NULL -> oops -> panic (panic_on_oops=1) ->
+# reset (documented crash). With the MCU stopped the order is
+# the only safe one, and it is the same as stock (loads both in
+# vendor_dlkm/modules.load before starting the MCU).
 #
-# v2 (22-09-2026): NO se pre-habilita el RSB. Con pending_enable=1 el driver,
-# al completar el CONFIGR_RSB del AFTER_POWERUP, manda el SLATERSB_ENABLE al
-# MCU de inmediato -> candidato nº1 del reset a los pocos segundos de arrancar
-# el MCU (AGENTS §6). El ENABLE se hace AL FINAL, con BT ya confirmado.
+# v2 (2026-09-22): the RSB is NOT pre-enabled. With pending_enable=1 the driver,
+# on completing the AFTER_POWERUP CONFIGR_RSB, sends SLATERSB_ENABLE to the MCU
+# immediately -> prime suspect for the reset a few seconds after starting the
+# MCU. ENABLE is done AT THE END, with BT already confirmed.
 set -u
 
-# El log va a /run (tmpfs, lectura en vivo) Y a /var/log (eMMC: sobrevive a un
-# reset duro, que es justo lo que hay que depurar). sync por linea: son ~40.
+# The log goes to /run (tmpfs, live read) AND to /var/log (eMMC: survives a hard
+# reset, which is exactly what needs debugging). sync per line: there are ~40.
 log() {
     _l="$(date '+%H:%M:%S') dace-slate-mcu: $*"
     echo "$_l" >> /run/dace-slate-mcu.log
@@ -45,38 +46,38 @@ log() {
     sync 2>/dev/null
 }
 
-# NOTA CRITICA (20-09-2026): este servicio NO escribe a journald ni a la consola
-# (StandardOutput=null en el unit). Medido: con journald/logd atascados (pasa en
-# arranques cargados) cualquier escritura a journald BLOQUEA, y el script se
-# quedaba colgado en su primer mensaje -> 'start operation timed out' y el MCU
-# nunca arrancaba. El log va a /run (tmpfs, sin desgaste) y se puede leer luego:
+# CRITICAL NOTE (2026-09-20): this service does NOT write to journald or the
+# console (StandardOutput=null in the unit). Measured: with journald/logd stuck
+# (it happens on loaded boots) any write to journald BLOCKS, and the script hung
+# on its first message -> 'start operation timed out' and the MCU never started.
+# The log goes to /run (tmpfs, no wear) and can be read later:
 #   cat /run/dace-slate-mcu.log
-# Por el mismo motivo ya no se usa lxc-attach en la ruta critica (se cuelga
-# cuando lo lanza un unit): pss arranca por la linea 'interface' del .rc y el
-# HAL/bluebinder se relanzan matandolos por /proc.
+# For the same reason lxc-attach is no longer used on the critical path (it
+# hangs when launched by a unit): pss starts via the .rc 'interface' line and
+# the HAL/bluebinder are relaunched by killing them via /proc.
 
 # 2) powerstateservice (vendor.qti.hardware.powerstateservice@1.0).
-#    Es el PEER de estado del MCU slate (TWM/deep-sleep): /dev/power_state y
-#    /dev/slate_com_dev. Lo arranca el init del contenedor GRACIAS a la linea
-#    'interface' que dace-lxc-android-start.sh le añade a su .rc (su .rc original
-#    no la trae y por eso nunca arrancaba: 'Could not find
-#    ...IPowerStateService/default' cada 60 s).
-#    TIENE QUE ESTAR ARRANCADO ANTES DE LEVANTAR EL MCU: sin el, el MCU se queda
-#    sin quien le conteste los cambios de estado y el SoC acaba en Oops.
-#    AQUI NO SE USA lxc-attach (se cuelga desde un unit): solo se comprueba que
-#    el servicio haya abierto /dev/power_state.
+#    It is the slate MCU's state PEER (TWM/deep-sleep): /dev/power_state and
+#    /dev/slate_com_dev. It is started by the container init THANKS to the
+#    'interface' line that dace-lxc-android-start.sh adds to its .rc (its
+#    original .rc does not have it and that is why it never started: 'Could not
+#    find ...IPowerStateService/default' every 60 s).
+#    IT MUST BE STARTED BEFORE BRINGING UP THE MCU: without it, the MCU is left
+#    with nobody to answer its state changes and the SoC ends in an Oops.
+#    lxc-attach IS NOT USED HERE (it hangs from a unit): we only check that the
+#    service opened /dev/power_state.
 for _i in 1 2 3 4 5 6; do
     [ -c /dev/power_state ] && break
     sleep 2
 done
 if [ -c /dev/power_state ]; then
-    log "pss OK (/dev/power_state presente)"
+    log "pss OK (/dev/power_state present)"
 else
-    log "AVISO: /dev/power_state ausente: pss no arranco (mirar el .rc/overlay)"
+    log "WARNING: /dev/power_state absent: pss did not start (check the .rc/overlay)"
 fi
 
-# 3) Esperar a que exista el remoteproc del MCU (qcom_rproc_slate lo crea al
-#    probe; su .ko tambien lo pide udev, pero puede ir con retraso).
+# 3) Wait for the MCU remoteproc to exist (qcom_rproc_slate creates it at probe;
+#    its .ko is also requested by udev, but it can be late).
 i=0
 while [ $i -lt 20 ]; do
     [ -e /sys/class/remoteproc/remoteproc2/state ] && break
@@ -84,55 +85,56 @@ while [ $i -lt 20 ]; do
     sleep 1
 done
 if [ ! -e /sys/class/remoteproc/remoteproc2/state ]; then
-    log "AVISO: no existe /sys/class/remoteproc/remoteproc2/state (pila slate no cargada)"
+    log "WARNING: /sys/class/remoteproc/remoteproc2/state does not exist (slate stack not loaded)"
     exit 0
 fi
 RSB=/sys/devices/platform/soc/soc:qcom,slate-rsb/enable
 
-# (corona) Cargar la pila RSB ahora — SIEMPRE con el MCU parado (el `echo
-# start` esta mas abajo): slatersb_rpmsg probeando con slate_rsb ausente
-# (rsb_ops.glink_channel_state=NULL) es una llamada a NULL -> oops -> reset.
-# Fallback por si dace-modules-load fallo o esta mascarado (boot noautoload);
-# en el arranque normal ya vienen de ahi y esto no hace nada.
+# (crown) Load the RSB stack now — ALWAYS with the MCU stopped (the `echo
+# start` is further below): slatersb_rpmsg probing with slate_rsb absent
+# (rsb_ops.glink_channel_state=NULL) is a call to NULL -> oops -> reset.
+# Fallback in case dace-modules-load failed or is masked (boot noautoload); on a
+# normal boot they already come from there and this does nothing.
 if ! grep -q '^slate_rsb ' /proc/modules; then
     timeout 8 modprobe slatersb_rpmsg slate_rsb >> /run/dace-slate-mcu.log 2>&1
 fi
 if grep -q '^slate_rsb ' /proc/modules; then
-    log "corona: slate_rsb+slatersb_rpmsg cargados (enable=$(if [ -e "$RSB" ]; then echo si; else echo no; fi))"
+    log "crown: slate_rsb+slatersb_rpmsg loaded (enable=$(if [ -e "$RSB" ]; then echo yes; else echo no; fi))"
 else
-    # Sin slate_rsb, abrir el canal crashearia: descargo slatersb (nunca ha
-    # probeado, el canal aun no existe) y la blacklist impide que udev lo
-    # recargue solo -> corona inerte, pero BT arranca y el reloj NO resetea.
-    log "AVISO: corona: slate_rsb NO cargo; descargo slatersb_rpmsg si esta suelto"
+    # Without slate_rsb, opening the channel would crash: unload slatersb (it
+    # never probed, the channel does not exist yet) and the blacklist prevents
+    # udev from reloading it on its own -> crown inert, but BT starts and the
+    # watch does NOT reset.
+    log "WARNING: crown: slate_rsb did NOT load; unloading slatersb_rpmsg if it is loose"
     rmmod slatersb_rpmsg >> /run/dace-slate-mcu.log 2>&1
 fi
 
-# (corona/seguridad) qcom_rproc_slate hardcodea recovery_disabled=true y
-# slate_restart_work hace BUG_ON(recovery_disabled): un crash del MCU = BUG =
-# panic del kernel = reset. Con 'enabled' (mismo truco que el DOG del modem en
-# dace-vendor-mount) ese crash va al recovery del rproc. No-op si no esta crashed.
+# (crown/safety) qcom_rproc_slate hardcodes recovery_disabled=true and
+# slate_restart_work does BUG_ON(recovery_disabled): an MCU crash = BUG = kernel
+# panic = reset. With 'enabled' (same trick as the modem DOG in
+# dace-vendor-mount) that crash goes to rproc recovery. No-op if it is not crashed.
 if echo enabled > /sys/class/remoteproc/remoteproc2/recovery 2>/dev/null; then
-    log "corona/seguridad: remoteproc2 recovery=enabled"
+    log "crown/safety: remoteproc2 recovery=enabled"
 fi
 
 case "$(cat /sys/class/remoteproc/remoteproc2/state 2>/dev/null)" in
     running)
-        log "el MCU ya estaba arrancado"
+        log "the MCU was already started"
         ;;
     *)
-        # CORONA v2: NO pre-habilitar el RSB aqui (ver cabecera). El enable va
-        # al final, con el BT ya arriba.
-        # 5) Arrancar el MCU -> notificacion SSR -> SPI FREE + glink -> BT listo
-        log "arrancando el MCU (remoteproc2)..."
+        # CROWN v2: do NOT pre-enable the RSB here (see header). The enable goes
+        # at the end, with BT already up.
+        # 5) Start the MCU -> SSR notification -> SPI FREE + glink -> BT ready
+        log "starting the MCU (remoteproc2)..."
         if echo start > /sys/class/remoteproc/remoteproc2/state 2>/dev/null; then
             log "MCU state=$(cat /sys/class/remoteproc/remoteproc2/state 2>/dev/null)"
         else
-            log "AVISO: fallo el arranque del MCU (firmware? ver dace-vendor-mount)"
+            log "WARNING: MCU start failed (firmware? see dace-vendor-mount)"
         fi
         ;;
 esac
 
-# 6) Esperar (max ~10 s) a que el enlace quede util: BT ready y canal del RSB.
+# 6) Wait (max ~10 s) for the link to become usable: BT ready and RSB channel.
 i=0
 while [ $i -lt 20 ]; do
     bt="$(cat /sys/kernel/slate_bt_state/slate_bt_state 2>/dev/null)"
@@ -142,83 +144,86 @@ while [ $i -lt 20 ]; do
 done
 log "slate_bt_state=${bt:-?} dsp_state=$(cat /sys/kernel/slate_dsp_state/slate_dsp_state 2>/dev/null)"
 if [ "$(cat /sys/kernel/slate_bt_state/slate_bt_state 2>/dev/null)" = "ready" ]; then
-    # El HAL de BT se rinde tras ~3 intentos (uno por minuto) si BTSS aun no
-    # estaba listo, y NO reintenta solo (el proceso queda vivo pero idle). Con
-    # el MCU ya arriba hay que relanzarlo: es exactamente la secuencia verificada
-    # en vivo (bring-up completo -> hci0 UP RUNNING con su BD Address).
-    # Alimentar (ciclar) el chip de BT: con soc=slate el HAL no vota
-    # reguladores y los rieles pm5100_l13/l17 se quedan APAGADOS -> chip mudo.
-    # Es lo que hace aurora via /dev/btpower. El ciclo 0->1 ademas resetea el
-    # chip, que vuelve a arrancar a 2400 bps (estado que espera el HAL).
+    # The BT HAL gives up after ~3 attempts (one per minute) if BTSS was not
+    # ready yet, and does NOT retry on its own (the process stays alive but
+    # idle). With the MCU already up it must be relaunched: this is exactly the
+    # sequence verified live (full bring-up -> hci0 UP RUNNING with its BD
+    # Address).
+    # Power (cycle) the BT chip: with soc=slate the HAL does not vote
+    # regulators and the pm5100_l13/l17 rails stay OFF -> mute chip.
+    # This is what aurora does via /dev/btpower. The 0->1 cycle also resets the
+    # chip, which restarts at 2400 bps (the state the HAL expects).
     if [ -x /usr/libexec/dace-bt-power.pl ]; then
         if /usr/bin/perl /usr/libexec/dace-bt-power.pl cycle >> /run/dace-slate-mcu.log 2>&1; then
-            log "chip BT alimentado (BT_CMD_PWR_CTRL cycle)"
+            log "BT chip powered (BT_CMD_PWR_CTRL cycle)"
         else
-            log "AVISO: fallo el power del chip BT (/dev/btpower)"
+            log "WARNING: BT chip power failed (/dev/btpower)"
         fi
     fi
-    # HAL de BT y su CLIENTE, relanzados SIN lxc-attach (medido 20-09-2026:
-    # `lxc-attach` se cuelga cuando lo lanza un unit de systemd con el sistema
-    # cargado -- dbus/systemd saturados: desde el shell funciona, desde un
-    # service no). En su lugar los matamos por /proc: el init del contenedor
-    # relanza el HAL (esta verificado: cambia de pid) y systemd relanza
-    # bluebinder (Restart=always). Sin un bluebinder FRESCO el HAL no llega a
-    # inicializar ("Waiting for bluetooth service" para siempre) y hci0 se
-    # queda sin BD address. Con ambos frescos + slate listo -> hci0 UP RUNNING.
+    # BT HAL and its CLIENT, relaunched WITHOUT lxc-attach (measured 2026-09-20:
+    # `lxc-attach` hangs when launched by a systemd unit with the system loaded
+    # -- dbus/systemd saturated: it works from the shell, not from a service).
+    # Instead we kill them via /proc: the container init relaunches the HAL
+    # (verified: the pid changes) and systemd relaunches bluebinder
+    # (Restart=always). Without a FRESH bluebinder the HAL never gets to
+    # initialize ("Waiting for bluetooth service" forever) and hci0 stays
+    # without a BD address. With both fresh + slate ready -> hci0 UP RUNNING.
     for _p in /proc/[0-9]*; do
         _c=$(cat "$_p/comm" 2>/dev/null)
         case "$_c" in
-            *bluetooth@1.0*) kill -9 "${_p#/proc/}" 2>/dev/null && log "HAL BT relanzado (kill ${_p#/proc/})" ;;
-            bluebinder)      kill -9 "${_p#/proc/}" 2>/dev/null && log "bluebinder relanzado (kill ${_p#/proc/})" ;;
+            *bluetooth@1.0*) kill -9 "${_p#/proc/}" 2>/dev/null && log "BT HAL relaunched (kill ${_p#/proc/})" ;;
+            bluebinder)      kill -9 "${_p#/proc/}" 2>/dev/null && log "bluebinder relaunched (kill ${_p#/proc/})" ;;
         esac
     done
-    log "slate OK (BT listo)"
+    log "slate OK (BT ready)"
 else
-    log "AVISO: slate_bt_state no esta ready (revisar el enlace glink)"
+    log "WARNING: slate_bt_state is not ready (check the glink link)"
 fi
 
-# 7) Esperar a que el controlador quede operativo (hci0 con BD address).
-# OJO: el bring-up REAL tarda ~100 s desde aqui: el HAL esta relanzado pero su
-# primer intento con el chip ya alimentado llega en el siguiente ciclo (~60 s) y
-# la descarga del patch+NVM son unos segundos mas (medido 21-09-2026: hci0 sube
-# a los ~90-110 s). El tope anterior (40 x 2 s = 80 s) se quedaba corto y el log
-# escupia un AVISO enganoso aunque todo acabara bien: por eso 150 x 2 s = 300 s.
+# 7) Wait for the controller to become operational (hci0 with a BD address).
+# NOTE: the REAL bring-up takes ~100 s from here: the HAL is relaunched but its
+# first attempt with the chip already powered comes on the next cycle (~60 s) and
+# the patch+NVM download takes a few more seconds (measured 2026-09-21: hci0
+# comes up at ~90-110 s). The previous cap (40 x 2 s = 80 s) was too short and
+# the log spat out a misleading WARNING even though everything ended fine: hence
+# 150 x 2 s = 300 s.
 i=0
 while [ $i -lt 150 ]; do
     if hciconfig 2>/dev/null | grep -qE "BD Address: ([0-9A-Fa-f]{2}:){5}" && \
        ! hciconfig 2>/dev/null | grep -q "BD Address: 00:00:00:00:00:00"; then
-        log "hci0 LISTO: $(hciconfig 2>/dev/null | sed -n 2p | tr -s " ")"
+        log "hci0 READY: $(hciconfig 2>/dev/null | sed -n 2p | tr -s " ")"
         break
     fi
     i=$((i + 1))
     sleep 2
 done
-[ $i -ge 150 ] && log "AVISO: hci0 no subio en ~300 s (mirar logcat del contenedor)"
+[ $i -ge 150 ] && log "WARNING: hci0 did not come up in ~300 s (check the container logcat)"
 
-# 8) CORONA v2: habilitar el RSB AL FINAL. El CONFIGR_RSB ya lo mando el driver
-#    al arrancar el MCU (slatersb_slateup_work en el AFTER_POWERUP); aqui, con
-#    is_cnfgrd, el store_enable encola slatersb_enable_rsb -> SLATERSB_ENABLE
-#    al MCU. Se hace despues del BT para no ponerlo en riesgo: si esto resetea,
-#    el log persistente (/var/log/dace-slate-mcu.log) dira 'hci0 LISTO' antes,
-#    o sea el culpable es el ENABLE (no el CONFIGR ni el arranque del MCU).
+# 8) CROWN v2: enable the RSB AT THE END. The CONFIGR_RSB was already sent by
+#    the driver when starting the MCU (slatersb_slateup_work in the
+#    AFTER_POWERUP); here, with is_cnfgrd, store_enable queues
+#    slatersb_enable_rsb -> SLATERSB_ENABLE to the MCU. It is done after BT so
+#    as not to put it at risk: if this resets, the persistent log
+#    (/var/log/dace-slate-mcu.log) will say 'hci0 READY' before, i.e. the culprit
+#    is the ENABLE (not the CONFIGR or the MCU start).
 n=0
 while [ -e "$RSB" ] && [ "$n" -lt 5 ]; do
     if echo 1 > "$RSB" 2>/dev/null; then
-        log "corona: RSB habilitado (enable=1 ok, intento $n)"
+        log "crown: RSB enabled (enable=1 ok, attempt $n)"
         break
     fi
-    log "corona: enable=1 -> ENOMEDIUM (intento $n; aun sin CONFIGR_RSB)"
+    log "crown: enable=1 -> ENOMEDIUM (attempt $n; no CONFIGR_RSB yet)"
     n=$((n + 1))
     sleep 2
 done
 if [ -e "$RSB" ] && [ "$n" -ge 5 ]; then
-    log "AVISO: corona: enable no aceptado x5 (buscar 'slatersb' en dmesg)"
+    log "WARNING: crown: enable not accepted x5 (look for 'slatersb' in dmesg)"
 fi
 
-# 9) Verificación de BATERÍA en fichero persistente (24-09-2026). El smblite se
-#    carga TEMPRANO en dace-lxc-hal-start; aquí (tarde) ya ha tenido tiempo de
-#    recibir (o no) los datos QBG del MCU. Sirve para leer el resultado aunque
-#    usb-moded cambie a mass storage y se pierda adb.
+# 9) BATTERY verification in a persistent file (2026-09-24). The smblite is
+#    loaded EARLY in dace-lxc-hal-start; here (late) it has already had time to
+#    receive (or not) the QBG data from the MCU. Useful to read the result even
+#    if usb-moded switches to mass storage and adb is lost.
 {
     echo "=== battery report $(date) ==="
     ls /sys/class/power_supply/ 2>&1

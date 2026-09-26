@@ -1,11 +1,11 @@
 From: TicWatch Pro 5 (dace) port
-Subject: [PATCH] tty: msm_geni_serial: forzar FIFO en el HS UART del BT
+Subject: [PATCH] tty: msm_geni_serial: force FIFO on the BT HS UART
 
-El wrapper QUP @4ac0000 no tiene dominio IOMMU (es built-in y el apps-smmu es
-modulo; of_iommu_configure() no se reintenta) y el SE-DMA del HS UART se lleva
-un RX_SBE (bus error) en el primer open() -> reset duro del SoC. Con gsi_mode=0
-y FIFO NO deshabilitado, forzamos GENI_SE_FIFO para el HS UART no-consola (el
-BT): usa PIO del CPU, sin DMA, y evita el bus error. Parche del bring-up dace.
+The QUP wrapper @4ac0000 has no IOMMU domain (it is built-in and apps-smmu is a
+module; of_iommu_configure() is not retried) and the HS UART SE-DMA takes an
+RX_SBE (bus error) on the first open() -> hard SoC reset. With gsi_mode=0 and
+FIFO NOT disabled, we force GENI_SE_FIFO for the non-console HS UART (the BT):
+it uses CPU PIO, no DMA, and avoids the bus error. dace bring-up patch.
 
 Upstream-Status: Inappropriate [dace bring-up]
 ---
@@ -18,10 +18,10 @@ index 0d32f2595297..3ccbc40b9e37 100644
  static bool con_enabled = IS_ENABLED(CONFIG_SERIAL_MSM_GENI_CONSOLE_DEFAULT_ENABLED);
  
 +/*
-+ * dace (TicWatch Pro 5): forzar FIFO en el HS UART. El wrapper QUP no tiene
-+ * dominio IOMMU (es built-in y el apps-smmu es modulo) y su SE-DMA se lleva un
-+ * RX_SBE (bus error) al primer open -> reset duro. FIFO usa PIO del CPU (sin
-+ * DMA) y evita el problema. Solo afecta al HS UART no-consola (el BT).
++ * dace (TicWatch Pro 5): force FIFO on the HS UART. The QUP wrapper has no
++ * IOMMU domain (it is built-in and apps-smmu is a module) and its SE-DMA takes
++ * an RX_SBE (bus error) on open -> hard reset. FIFO uses CPU PIO (no DMA) and
++ * avoids the problem. It only affects the non-console HS UART (the BT).
 + */
 +static bool dace_hs_uart_fifo = true;
 +module_param(dace_hs_uart_fifo, bool, 0644);

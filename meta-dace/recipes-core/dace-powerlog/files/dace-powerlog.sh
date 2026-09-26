@@ -1,8 +1,8 @@
 #!/bin/sh
-# dace: log persistente del estado de energía (para verificar el suspend sin
-# depender de adb: usb-moded puede pasar a mass storage al detectar la psy usb).
-# Escribe en /var/log/dace-power.log cada 30 s: suspend_stats/success, autosleep,
-# wake locks activos, capacidad de batería y las wakeup_sources activas.
+# dace: persistent power-state log (to verify suspend without depending on adb:
+# usb-moded may switch to mass storage when it detects the usb psy).
+# Writes to /var/log/dace-power.log every 30 s: suspend_stats/success,
+# autosleep, active wake locks, battery capacity and the active wakeup_sources.
 LOG=/var/log/dace-power.log
 echo "=== dace-powerlog start $(date) ===" >> "$LOG"
 while true; do
@@ -19,7 +19,7 @@ while true; do
         echo "dwc=\"$(cat /sys/bus/platform/devices/4e00000.hsusb/power/runtime_status 2>/dev/null)/$(cat /sys/bus/platform/devices/4e00000.hsusb/power/control 2>/dev/null)\""
         echo "active_wakeup_sources=[$(awk 'NR>1 && $6>0 {print $1}' /sys/kernel/debug/wakeup_sources 2>/dev/null | tr '\n' ' ')]"
     } >> "$LOG" 2>&1
-    # recorte: que no crezca sin límite en la eMMC
+    # trim: so it does not grow without bound on the eMMC
     [ "$(wc -l < "$LOG" 2>/dev/null)" -gt 4000 ] && tail -n 2000 "$LOG" > "$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG" 2>/dev/null
     sync
     sleep 30

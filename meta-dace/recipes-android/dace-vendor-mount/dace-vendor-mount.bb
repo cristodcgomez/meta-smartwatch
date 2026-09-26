@@ -1,14 +1,14 @@
 SUMMARY = "Recreate the dm-linear mappings for the T5's /super partitions and mount them"
-DESCRIPTION = "El T5 (TicWatch Pro 5, monaco/SW5100) lleva Wear OS 13 con \
-particiones dinamicas: system/vendor/product/system_ext/vendor_dlkm/system_dlkm \
-viven dentro de /super (/dev/mmcblk0p7, 4 GiB) y Android las expone con \
-dm-linear desde su first-stage init. Nuestro initramfs es un shell script que \
-no parsea la metadata LP, asi que el servicio recrea las tablas (leidas con \
-lpdump de la metadata real del super del T5, geometria en el offset 4096) y \
-monta los devices en /android/* -- que es lo que el contenedor LXC bind-montea \
-dentro de su rootfs -- mas los symlinks /vendor -> /android/vendor y \
-/system -> /var/lib/lxc/android/rootfs/system que esperan Halium y libhybris. \
-Sin esto el launcher aborta con 'failed to find/load gralloc'."
+DESCRIPTION = "The T5 (TicWatch Pro 5, monaco/SW5100) ships Wear OS 13 with \
+dynamic partitions: system/vendor/product/system_ext/vendor_dlkm/system_dlkm \
+live inside /super (/dev/mmcblk0p7, 4 GiB) and Android exposes them via \
+dm-linear from its first-stage init. Our initramfs is a shell script that does \
+not parse the LP metadata, so the service recreates the tables (read with \
+lpdump from the real T5 super metadata, geometry at offset 4096) and mounts the \
+devices at /android/* -- which is what the LXC container bind-mounts into its \
+rootfs -- plus the symlinks /vendor -> /android/vendor and \
+/system -> /var/lib/lxc/android/rootfs/system that Halium and libhybris expect. \
+Without this the launcher aborts with 'failed to find/load gralloc'."
 
 LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0-only;md5=c79ff39f19dfec6d293b95dea7b07891"

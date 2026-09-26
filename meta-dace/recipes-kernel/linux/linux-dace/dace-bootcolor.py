@@ -1,35 +1,35 @@
 #!/usr/bin/env python3
 # dace kernel source fixes:
-#  1. boot-color debug (RED/AZUL/AMARILLO) en init/main.c
-#  2. slatecom_interface.c: hacer ssr_register() condicional a que
-#     qcom_register_ssr_notifier sea ALCANZABLE (IS_REACHABLE: built-in O
-#     modulo). Es tristate ciego y no se puede forzar =y; sin el stub el link
-#     de vmlinux rompe con 'undefined symbol: qcom_register_ssr_notifier'.
-#     v2 (2026-09-20): IS_BUILTIN era demasiado estricto (en dace
-#     QCOM_RPROC_COMMON=m) y dejaba el registro SSR SIN HACER: el MCU del
-#     slate arrancaba pero nunca se llamaba slatecom_set_spi_state(SPI_FREE)
-#     -> sin IRQ qcom-slate_spi -> sin enlace glink -> sin corona ni BT.
+#  1. boot-color debug (RED/BLUE/YELLOW) in init/main.c
+#  2. slatecom_interface.c: make ssr_register() conditional on
+#     qcom_register_ssr_notifier being REACHABLE (IS_REACHABLE: built-in OR
+#     module). It is a blind tristate and cannot be forced =y; without the stub
+#     the vmlinux link breaks with 'undefined symbol: qcom_register_ssr_notifier'.
+#     v2 (2026-09-20): IS_BUILTIN was too strict (on dace
+#     QCOM_RPROC_COMMON=m) and left the SSR registration UNDONE: the slate MCU
+#     started but slatecom_set_spi_state(SPI_FREE) was never called
+#     -> no qcom-slate_spi IRQ -> no glink link -> no crown and no BT.
 #
-# ── v2 (2026-08-24): corrección crítica de la telemetría ──
-# La v1 usaba ioremap_wc() sobre 0x5c000000. Esa región (splash_region) es
-# RAM reservada SIN no-map en el DTB del dace → pfn_valid()=true → el
-# __ioremap de arm64 hace WARN_ON y devuelve NULL. Consecuencia: ROJO NUNCA
-# se pintó (ni en QEMU ni en el reloj) y además se inyectaba un WARN dentro
-# de start_kernel. Todo el diagnóstico "el kernel no llega a start_kernel"
-# basado en la ausencia de ROJO queda INVALIDADO.
-# La v2 usa phys_to_virt() (la región está en el linear map) sin ninguna
-# asignación (kmalloc NO existe aún en start_kernel: slab no está up).
-# Añade además /sys/kernel/dace_color para que el init pinte VERDE desde
-# userspace, y AMARILLO en kernel_init (justo antes de ejecutar /init).
+# ── v2 (2026-08-24): critical telemetry fix ──
+# v1 used ioremap_wc() over 0x5c000000. That region (splash_region) is reserved
+# RAM WITHOUT no-map in the dace DTB -> pfn_valid()=true -> the arm64 __ioremap
+# does a WARN_ON and returns NULL. Consequence: RED was NEVER painted (neither
+# in QEMU nor on the watch) and a WARN was injected inside start_kernel. All the
+# "the kernel does not reach start_kernel" diagnosis based on the absence of RED
+# is INVALIDATED.
+# v2 uses phys_to_virt() (the region is in the linear map) with no allocation at
+# all (kmalloc does NOT exist yet in start_kernel: slab is not up).
+# It also adds /sys/kernel/dace_color so init can paint GREEN from userspace, and
+# YELLOW in kernel_init (right before executing /init).
 import sys, os
 
 def patch_bootcolor(path):
     src = open(path).read()
     if 'ioremap_wc(DACE_SPLASH_PHYS' in src:
-        sys.exit("bootcolor: código v1 (ioremap, ROTO) presente en %s — "
-                 "ejecuta: bitbake -c cleansstate linux-ticwatch-pro-5" % path)
+        sys.exit("bootcolor: v1 code (ioremap, BROKEN) present in %s — "
+                 "run: bitbake -c cleansstate linux-ticwatch-pro-5" % path)
     if 'dace_boot_color' in src:
-        print("bootcolor: v2 ya inyectado")
+        print("bootcolor: v2 already injected")
         return
     HELPER = '''
 /* ---- dace boot-color debug v2 (continuous-splash fb @ 0x5c000000) ---- */
@@ -38,10 +38,10 @@ def patch_bootcolor(path):
 #define DACE_FB_HEIGHT    400
 #define DACE_FB_NPIX      (DACE_FB_WIDTH * DACE_FB_HEIGHT)
 
-/* splash_region@5c000000 es RAM reservada SIN no-map en el DTB del dace:
- * está en el linear map. ioremap_wc() sobre ella hace WARN_ON+NULL (la v1
- * nunca pintó nada). phys_to_virt() es aritmética pura: sin page tables,
- * sin asignaciones (en start_kernel el slab NO está disponible). */
+/* splash_region@5c000000 is reserved RAM WITHOUT no-map in the dace DTB:
+ * it is in the linear map. ioremap_wc() over it does WARN_ON+NULL (v1 never
+ * painted anything). phys_to_virt() is pure arithmetic: no page tables, no
+ * allocations (in start_kernel slab is NOT available). */
 static void dace_boot_color(u32 argb)
 {
 	u32 *fb = (u32 *)phys_to_virt((phys_addr_t)DACE_SPLASH_PHYS);
@@ -51,7 +51,7 @@ static void dace_boot_color(u32 argb)
 		return;
 	for (i = 0; i < DACE_FB_NPIX; i++)
 		fb[i] = argb;
-	dsb(sy); /* que el scanout del SDE lo vea */
+	dsb(sy); /* so the SDE scanout sees it */
 }
 
 static ssize_t dace_color_store(struct kobject *k, struct kobj_attribute *a,
@@ -65,11 +65,11 @@ static ssize_t dace_color_store(struct kobject *k, struct kobj_attribute *a,
 static struct kobj_attribute dace_color_attr =
 	__ATTR(dace_color, 0200, NULL, dace_color_store);
 
-/* Barcode de diagnóstico USB: pitch 466 (panel RM69090 466x466, calibrado
- * en v24). 8 franjas verticales: BLANCA=1, ROJA=0, franja 1 = izquierda,
- * con separadores NEGROS de 4px entre franjas para leer límites sin
- * ambigüedad. Si el buffer contiene "XXXXXXXX YYYYYYYY" (espacio), la mitad
- * superior pinta el primer grupo y la inferior el segundo. */
+/* USB diagnostic barcode: pitch 466 (RM69090 panel 466x466, calibrated in
+ * v24). 8 vertical stripes: WHITE=1, RED=0, stripe 1 = leftmost, with 4px
+ * BLACK separators between stripes to read boundaries unambiguously. If the
+ * buffer contains "XXXXXXXX YYYYYYYY" (space), the top half paints the first
+ * group and the bottom half the second. */
 static void dace_paint_half(u32 *fb, int r0, int r1, const char *bits)
 {
 	const int P = 466, W = P / 8;
@@ -84,7 +84,7 @@ static void dace_paint_half(u32 *fb, int r0, int r1, const char *bits)
 			for (i = 0; i < W - 4; i++)
 				row[s * W + i] = c;
 			for (; i < W; i++)
-				row[s * W + i] = 0;	 /* separador negro */
+				row[s * W + i] = 0;	 /* black separator */
 		}
 	}
 }
@@ -98,7 +98,7 @@ static void dace_barcode(const char *bits)
 	if (!fb)
 		return;
 	for (i = 0; i < DACE_FB_NPIX; i++)
-		fb[i] = 0;					 /* fondo negro */
+		fb[i] = 0;					 /* black background */
 	spc = strchr(bits, ' ');
 	if (spc && strlen(spc + 1) >= 8)
 		dace_paint_half(fb, 233, 466, spc + 1);
@@ -119,9 +119,9 @@ static ssize_t dace_barcode_store(struct kobject *k, struct kobj_attribute *a,
 static struct kobj_attribute dace_barcode_attr =
 	__ATTR(dace_barcode, 0200, NULL, dace_barcode_store);
 
-/* ---- dace_text: pinta texto ASCII con fuente 5x7 sobre el splash ----
- * Útil para volcar dmesg por pantalla (sin UART ni adb). 466/6 = 77
- * caracteres por línea, 466/8 = 58 líneas. */
+/* ---- dace_text: paints ASCII text with a 5x7 font over the splash ----
+ * Useful to dump dmesg on screen (no UART, no adb). 466/6 = 77
+ * characters per line, 466/8 = 58 lines. */
 static const unsigned char dace_font5x7[] = {
 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x5F,0x00,0x00,0x00,0x07,0x00,0x07,0x00,
 	0x14,0x7F,0x14,0x7F,0x14,0x24,0x2A,0x7F,0x2A,0x12,0x23,0x13,0x08,0x64,0x62,
@@ -194,8 +194,8 @@ static unsigned int dace_isqrt(unsigned int n)
 	return x;
 }
 
-/* caracteres por línea en la fila y (celda 12x16, círculo R=233 con 2px
- * de margen) */
+/* characters per line at row y (cell 12x16, circle R=233 with 2px
+ * margin) */
 static int dace_line_cap(int y)
 {
 	int yc = y + 8, dy = yc - 233;
@@ -221,7 +221,7 @@ static void dace_text(const char *t)
 	for (i = 0; i < DACE_FB_NPIX; i++)
 		fb[i] = 0;
 
-	/* layout en 2 pasadas: contar líneas y centrar verticalmente */
+	/* 2-pass layout: count lines and center vertically */
 	for (pass = 0; pass < 2; pass++) {
 		int lines = 0;
 
@@ -248,7 +248,7 @@ static void dace_text(const char *t)
 			y0 = 0;
 	}
 
-	/* pintado */
+	/* painting */
 	p = t;
 	y = y0;
 	while (*p && y <= 466 - 16) {
@@ -306,88 +306,88 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
                           '#include <linux/io.h>\n#include <linux/sysfs.h>\n#include <linux/kobject.h>', 1)
     red_anchor = '\tearly_security_init();\n\tsetup_arch(&command_line);\n'
     red_inject = ('\tearly_security_init();\n\tsetup_arch(&command_line);\n'
-                  '\tdace_boot_color(0x00ff0000); /* ROJO: start_kernel alcanzado */\n'
+                  '\tdace_boot_color(0x00ff0000); /* RED: start_kernel reached */\n'
                   '\tpr_err("dace-bootcolor: RED (setup_arch done)\\n");\n')
     if red_anchor not in src:
-        sys.exit("bootcolor: no anchor RED")
+        sys.exit("bootcolor: no RED anchor")
     src = src.replace(red_anchor, red_inject, 1)
     blue_anchor = '\tdo_basic_setup();\n'
     blue_inject = ('\tdo_basic_setup();\n\n'
-                   '\tdace_boot_color(0x000000ff); /* AZUL: initcalls hechos, a por /init */\n'
+                   '\tdace_boot_color(0x000000ff); /* BLUE: initcalls done, heading for /init */\n'
                    '\tpr_err("dace-bootcolor: BLUE (kernel up, exec init next)\\n");\n')
     if blue_anchor not in src:
-        sys.exit("bootcolor: no anchor BLUE")
+        sys.exit("bootcolor: no BLUE anchor")
     src = src.replace(blue_anchor, blue_inject, 1)
-    # CYAN: wait_for_initramfs() completado (el kernel ya no espera al initrd).
-    # Si el AZUL aparece pero el CYAN no, el hang esta en kunit/wait_for_initramfs.
+    # CYAN: wait_for_initramfs() completed (the kernel no longer waits for the initrd).
+    # If BLUE appears but CYAN does not, the hang is in kunit/wait_for_initramfs.
     cyan_anchor = '\twait_for_initramfs();\n'
     cyan_inject = ('\twait_for_initramfs();\n'
                    '\tdace_boot_color(0x00ff00ff); /* CYAN: wait_for_initramfs done */\n'
                    '\tpr_err("dace-bootcolor: CYAN (wait_for_initramfs done)\\n");\n')
     if cyan_anchor not in src:
-        sys.exit("bootcolor: no anchor CYAN")
+        sys.exit("bootcolor: no CYAN anchor")
     src = src.replace(cyan_anchor, cyan_inject, 1)
-    # VERDE: vamos a execve del /init del initramfs (run_init_process).
+    # GREEN: about to exec the initramfs /init (run_init_process).
     green_anchor = '\tif (ramdisk_execute_command) {\n'
     green_inject = ('\tif (ramdisk_execute_command) {\n'
-                    '\tdace_boot_color(0x0000ff00); /* VERDE: exec /init */\n')
+                    '\tdace_boot_color(0x0000ff00); /* GREEN: exec /init */\n')
     if green_anchor not in src:
-        sys.exit("bootcolor: no anchor GREEN")
+        sys.exit("bootcolor: no GREEN anchor")
     src = src.replace(green_anchor, green_inject, 1)
-    # AMARILLO: entramos en kernel_init (rest_init funcionó; a continuación
-    # se ejecuta /init del initramfs). Distingue "kernel completo OK" de
-    # "el exec de /init falla".
+    # YELLOW: we enter kernel_init (rest_init worked; next the initramfs /init is
+    # executed). It distinguishes "kernel fully OK" from "the /init exec fails".
     kinit_anchor = 'static int __ref kernel_init(void *unused)\n{\n'
     kinit_inject = ('static int __ref kernel_init(void *unused)\n{\n'
-                    '\tdace_boot_color(0x00ffff00); /* AMARILLO: kernel_init */\n'
+                    '\tdace_boot_color(0x00ffff00); /* YELLOW: kernel_init */\n'
                     '\tpr_err("dace-bootcolor: YELLOW (kernel_init, exec /init next)\\n");\n')
     if kinit_anchor in src:
         src = src.replace(kinit_anchor, kinit_inject, 1)
     else:
-        print("bootcolor: aviso, anchor YELLOW no encontrado (kernel_init)")
+        print("bootcolor: warning, YELLOW anchor not found (kernel_init)")
     open(path, 'w').write(src)
-    print("bootcolor: RED + BLUE + YELLOW + /sys/kernel/dace_color inyectados")
+    print("bootcolor: RED + BLUE + YELLOW + /sys/kernel/dace_color injected")
 
 def patch_slatecom(path):
     if not os.path.exists(path):
-        print("slatecom: %s no existe, skip" % path)
+        print("slatecom: %s does not exist, skip" % path)
         return
     src = open(path).read()
     if 'IS_REACHABLE(CONFIG_QCOM_RPROC_COMMON)' in src:
-        print("slatecom: ya parcheado (IS_REACHABLE)")
+        print("slatecom: already patched (IS_REACHABLE)")
         return
     new = '''static void ssr_register(void)
 {
 	int i;
 
-	/* dace fix v2: qcom_register_ssr_notifier vive en QCOM_RPROC_COMMON, que
-	 * en dace es MODULO (=m), no built-in. Con IS_BUILTIN este if era
-	 * SIEMPRE cierto y ssr_register() salia sin registrar NADA: ssr_slate_cb
-	 * no corria nunca, slatecom_set_spi_state(SLATECOM_SPI_FREE) no se
-	 * llamaba al arrancar el MCU y la IRQ qcom-slate_spi no se pedia -> el
-	 * enlace glink no subia (ni corona ni BT, que van por el MCU).
-	 * IS_REACHABLE es lo correcto: cierto si el provider es built-in O si
-	 * ambos (provider y este fichero) son modulos. */
+	/* dace fix v2: qcom_register_ssr_notifier lives in QCOM_RPROC_COMMON, which
+	 * on dace is a MODULE (=m), not built-in. With IS_BUILTIN this if was
+	 * ALWAYS true and ssr_register() returned without registering ANYTHING:
+	 * ssr_slate_cb never ran, slatecom_set_spi_state(SLATECOM_SPI_FREE) was
+	 * not called when starting the MCU, and the qcom-slate_spi IRQ was not
+	 * requested -> the glink link did not come up (neither crown nor BT, which
+	 * go through the MCU).
+	 * IS_REACHABLE is the correct check: true if the provider is built-in OR if
+	 * both (provider and this file) are modules. */
 	if (!IS_REACHABLE(CONFIG_QCOM_RPROC_COMMON)) {
-		pr_info("ssr_register: QCOM_RPROC_COMMON no alcanzable, skip\\n");
+		pr_info("ssr_register: QCOM_RPROC_COMMON not reachable, skip\\n");
 		return;
 	}
 
 	for (i = 0; i < ARRAY_SIZE(service_data); i++) {'''
-    # v2: si ya estaba la version v1 (IS_BUILTIN) hay que SUSTITUIR el bloque
-    # inyectado, no volver a insertar (el arbol kernel-source es compartido y
-    # puede venir ya parcheado de un build anterior).
+    # v2: if version v1 (IS_BUILTIN) is already there, the injected block must be
+    # REPLACED, not inserted again (the kernel-source tree is shared and may
+    # already be patched from a previous build).
     old_v1 = '''static void ssr_register(void)
 {
 	int i;
 
-	/* dace fix: qcom_register_ssr_notifier vive en QCOM_RPROC_COMMON, que es
-	 * tristate ciego y no siempre built-in. Si no lo esta, el simbolo no
-	 * existe y el link de vmlinux rompe. SSR (subsystem-restart notify) no
-	 * es necesario para el funcionamiento base de slate/adb; lo hacemos
-	 * condicional a que el provider este built-in. */
+	/* dace fix: qcom_register_ssr_notifier lives in QCOM_RPROC_COMMON, which is
+	 * a blind tristate and not always built-in. If it is not, the symbol does
+	 * not exist and the vmlinux link breaks. SSR (subsystem-restart notify) is
+	 * not needed for the base operation of slate/adb; we make it conditional on
+	 * the provider being built-in. */
 	if (!IS_BUILTIN(CONFIG_QCOM_RPROC_COMMON)) {
-		pr_info("ssr_register: QCOM_RPROC_COMMON no built-in, skip\\n");
+		pr_info("ssr_register: QCOM_RPROC_COMMON not built-in, skip\\n");
 		return;
 	}
 
@@ -403,10 +403,10 @@ def patch_slatecom(path):
 
 	for (i = 0; i < ARRAY_SIZE(service_data); i++) {'''
     if old not in src:
-        sys.exit("slatecom: no se encontro ssr_register")
+        sys.exit("slatecom: ssr_register not found")
     src = src.replace(old, new, 1)
     open(path, 'w').write(src)
-    print("slatecom: ssr_register con IS_REACHABLE OK")
+    print("slatecom: ssr_register with IS_REACHABLE OK")
 
 patch_bootcolor(sys.argv[1])
 patch_slatecom(sys.argv[2])

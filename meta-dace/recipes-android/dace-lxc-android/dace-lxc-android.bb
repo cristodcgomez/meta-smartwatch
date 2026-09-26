@@ -112,29 +112,28 @@ do_install() {
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${UNPACKDIR}/dace-lxc-android.service \
         ${D}${systemd_unitdir}/system/dace-lxc-android.service
-    # Arranque de los HAL graficos del contenedor (allocator + composer): sus
-    # .rc no traen la linea 'interface', asi que el init de Android no los
-    # lanza por si solo y sin ellos el compositor se queda sin buffers.
+    # Start of the container graphics HALs (allocator + composer): their .rc
+    # files do not have the 'interface' line, so the Android init does not launch
+    # them on its own and without them the compositor is left without buffers.
     install -m 0755 ${UNPACKDIR}/dace-lxc-hal-start.sh \
         ${D}${libexecdir}/dace-lxc-hal-start.sh
     install -m 0644 ${UNPACKDIR}/dace-lxc-hal-start.service \
         ${D}${systemd_unitdir}/system/dace-lxc-hal-start.service
-    # Arranque del MCU del slate (remoteproc2): sin el, el enlace glink no sube
-    # y no hay ni corona ni BT (ver la cabecera del script). Va ANTES del HAL
-    # de BT porque el HAL espera slate_bt_state=ready.
+    # Start of the slate MCU (remoteproc2): without it, the glink link does not
+    # come up and there is neither crown nor BT (see the script header). It goes
+    # BEFORE the BT HAL because the HAL waits for slate_bt_state=ready.
     install -m 0755 ${UNPACKDIR}/dace-slate-mcu.sh \
         ${D}${libexecdir}/dace-slate-mcu.sh
     install -m 0644 ${UNPACKDIR}/dace-slate-mcu.service \
         ${D}${systemd_unitdir}/system/dace-slate-mcu.service
-    # Bring-up de la WLAN: cadena qcacld/icnss2 + ADSP + cnss-daemon + (gate)
-    # arranque del modem tras el MCU slate. Ver la cabecera de dace-wlan.sh.
+    # WLAN bring-up: qcacld/icnss2 chain + ADSP + cnss-daemon + (gated) modem
+    # start after the slate MCU. See the dace-wlan.sh header.
     install -m 0755 ${UNPACKDIR}/dace-wlan.sh \
         ${D}${libexecdir}/dace-wlan.sh
     install -m 0644 ${UNPACKDIR}/dace-wlan.service \
         ${D}${systemd_unitdir}/system/dace-wlan.service
-    # Alimentacion del chip de BT via /dev/btpower (BT_CMD_PWR_CTRL): con
-    # soc=slate el HAL no vota reguladores y los rieles l13/l17 se quedaban
-    # apagados -> chip mudo.
+    # BT chip power via /dev/btpower (BT_CMD_PWR_CTRL): with soc=slate the HAL
+    # does not vote regulators and the l13/l17 rails stayed off -> mute chip.
     install -m 0755 ${UNPACKDIR}/dace-bt-power.pl \
         ${D}${libexecdir}/dace-bt-power.pl
     install -m 0644 ${UNPACKDIR}/dace-lxc-android-rootfs.mount \

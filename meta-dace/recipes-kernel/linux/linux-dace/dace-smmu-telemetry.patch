@@ -1,26 +1,25 @@
 From: TicWatch Pro 5 (dace) port
-Subject: [PATCH] iommu/arm/arm-smmu: volcar la tabla SMR/S2CR y sCR0 (dace bring-up)
+Subject: [PATCH] iommu/arm/arm-smmu: dump the SMR/S2CR table and sCR0 (dace bring-up)
 
-Telemetria PURA (sin cambio de comportamiento) para resolver el fallo del DMA
-del QUP en dace: el UART HS da RX_SBE (bus error) y el GSI/GPI del slate
-"general error" (0x40) cuando los devices usan direcciones FISICAS (no tienen
-dominio IOMMU porque el arm_smmu se registra tarde). Hipotesis a resolver:
+PURE telemetry (no behavior change) to solve the QUP DMA failure on dace: the
+HS UART gives RX_SBE (bus error) and the slate GSI/GPI "general error" (0x40)
+when the devices use PHYSICAL addresses (they have no IOMMU domain because
+arm_smmu registers late). Hypotheses to resolve:
 
-  a) el stream no esta identificado por ninguna SMR y sCR0.USFCFG=1 lo aborta
-     (el stock no tiene driver IOMMU -> sCR0 queda con el valor del firmware),
-  b) el stream SI esta en la tabla del firmware y su CB traduce a un rango que
-     no cubre la direccion fisica.
+  a) the stream is not identified by any SMR and sCR0.USFCFG=1 aborts it
+     (stock has no IOMMU driver -> sCR0 keeps the firmware value),
+  b) the stream IS in the firmware table and its CB translates to a range that
+     does not cover the physical address.
 
-Se imprimen tres cosas (prefijo DACE-SMMU, nivel err para que lleguen a la
-consola USB del initramfs):
-  - DACE-SMMU-SCR0 (del firmware) y (want/read tras nuestra escritura): si el
-    read no coincide, el SMMU esta bloqueado por TZ y el bypass NO se puede
-    cambiar con arm_smmu.disable_bypass=0.
-  - DACE-SMMU-SMR: cada entrada real (idx/id/mask/tipo/privcfg/cbndx/pinned).
-  - DACE-SMMU-MATCH: si los streams que nos importan (0x000/0x001 display,
-    0x0c0/0x0c1 eMMC, 0x0e3 wrapper QUP+UART, 0x0f6 GPI-DMA del slate,
-    0x420/0x422 handoff del DT, 0x800/0x801/0x980/0x981 USB/SDE) coinciden con
-    alguna entrada.
+Three things are printed (prefix DACE-SMMU, err level so they reach the
+initramfs USB console):
+  - DACE-SMMU-SCR0 (from the firmware) and (want/read after our write): if the
+    read does not match, the SMMU is locked by TZ and bypass CANNOT be changed
+    with arm_smmu.disable_bypass=0.
+  - DACE-SMMU-SMR: each real entry (idx/id/mask/type/privcfg/cbndx/pinned).
+  - DACE-SMMU-MATCH: whether the streams we care about (0x000/0x001 display,
+    0x0c0/0x0c1 eMMC, 0x0e3 QUP wrapper+UART, 0x0f6 slate GPI-DMA,
+    0x420/0x422 DT handoff, 0x800/0x801/0x980/0x981 USB/SDE) match any entry.
 
 Upstream-Status: Inappropriate [dace bring-up]
 ---
@@ -32,14 +31,14 @@ diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu.c b/drivers/iommu/arm/arm-smmu/
  
  	reg = arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_sCR0);
 +	/*
-+	 * dace TELEMETRIA (dace-smmu-telemetry.patch): valor de sCR0 que dejo el
-+	 * firmware/bootloader ANTES de que Linux lo reescriba. Si USFCFG=1 los
-+	 * streams NO identificados reciben ABORT en vez de pasar (bypass); el
-+	 * kernel STOCK no tiene driver IOMMU -> este registro se queda como el
-+	 * firmware lo puso y por eso el stock funciona con direcciones fisicas.
++	 * dace TELEMETRY (dace-smmu-telemetry.patch): sCR0 value left by the
++	 * firmware/bootloader BEFORE Linux rewrites it. If USFCFG=1 the
++	 * unidentified streams get ABORT instead of passing (bypass); the STOCK
++	 * kernel has no IOMMU driver -> this register stays as the firmware set it
++	 * and that is why stock works with physical addresses.
 +	 */
 +	dev_err(smmu->dev,
-+		"DACE-SMMU-SCR0 (del firmware) = 0x%08x USFCFG=%d CLIENTPD=%d\n",
++		"DACE-SMMU-SCR0 (from firmware) = 0x%08x USFCFG=%d CLIENTPD=%d\n",
 +		reg, !!(reg & ARM_SMMU_sCR0_USFCFG),
 +		!(reg & ARM_SMMU_sCR0_CLIENTPD));
  
@@ -49,9 +48,9 @@ diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu.c b/drivers/iommu/arm/arm-smmu/
  	/* Push the button */
  	arm_smmu_tlb_sync_global(smmu);
  	arm_smmu_gr0_write(smmu, ARM_SMMU_GR0_sCR0, reg);
-+	/* dace TELEMETRIA: leer de vuelta para ver si el SMMU acepta la escritura
-+	 * (si esta bloqueado por TZ, read != want y el bypass no se puede cambiar
-+	 * desde un parametro del modulo). */
++	/* dace TELEMETRY: read back to see whether the SMMU accepts the write (if
++	 * it is locked by TZ, read != want and bypass cannot be changed from a
++	 * module parameter). */
 +	dev_err(smmu->dev,
 +		"DACE-SMMU-SCR0 want=0x%08x read=0x%08x USFCFG=%d CLIENTPD=%d disable_bypass=%d\n",
 +		reg, arm_smmu_gr0_read(smmu, ARM_SMMU_GR0_sCR0),
@@ -62,21 +61,21 @@ diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu.c b/drivers/iommu/arm/arm-smmu/
  static int arm_smmu_id_size_to_bits(int size)
 @@ -3592,6 +3611,54 @@
  	dev_err(smmu->dev,
- 		"DACE-SMMU %s: tabla del firmware: %d/%d SMR en uso, %d context banks reservados\n",
+ 		"DACE-SMMU %s: firmware table: %d/%d SMR in use, %d context banks reserved\n",
  		dev_name(smmu->dev), used, smmu->num_mapping_groups, cbs);
 +
 +	/*
-+	 * dace TELEMETRIA (dace-smmu-telemetry.patch): volcar la tabla SMR/S2CR
-+	 * REAL que dejo el firmware y comprobar si los streams que nos interesan
-+	 * estan MATCHed. Clave para decidir el arreglo:
-+	 *   - si 0xe3 (wrapper QUP/UART) y 0xf6 (GPI) NO estan matched, el fallo
-+	 *     del DMA (RX_SBE del UART, GError del GSI del slate) es el ABORT de
-+	 *     sCR0.USFCFG sobre streams no identificados -> el arreglo es dejar
-+	 *     pasar (bypass) o darles dominio; y si el firmware dejo USFCFG=0 en
-+	 *     sCR0 (ver DACE-SMMU-SCR0) el stock tampoco los identificaba.
-+	 *   - si SI estan matched, la transaccion se traduce con el CB del
-+	 *     firmware y lo que falla es que esa traduccion no cubre la direccion
-+	 *     fisica -> el arreglo es darles dominio IOMMU a los devices.
++	 * dace TELEMETRY (dace-smmu-telemetry.patch): dump the REAL SMR/S2CR
++	 * table left by the firmware and check whether the streams we care about
++	 * are MATCHed. Key to deciding the fix:
++	 *   - if 0xe3 (QUP/UART wrapper) and 0xf6 (GPI) are NOT matched, the DMA
++	 *     failure (UART RX_SBE, slate GSI GError) is the ABORT from
++	 *     sCR0.USFCFG on unidentified streams -> the fix is to let them pass
++	 *     (bypass); or give them a domain. If the firmware left USFCFG=0 in
++	 *     sCR0 (see DACE-SMMU-SCR0), stock did not identify them either.
++	 *   - if they ARE matched, the transaction is translated with the
++	 *     firmware CB and what fails is that this translation does not cover
++	 *     the physical address -> the fix is to give the devices a domain.
 +	 */
 +	for (i = 0; i < smmu->num_mapping_groups; ++i) {
 +		if (!smmu->smrs[i].valid)
@@ -109,7 +108,7 @@ diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu.c b/drivers/iommu/arm/arm-smmu/
 +			}
 +			dev_err(smmu->dev,
 +				"DACE-SMMU-MATCH sid=0x%03x -> idx=%d [%s]\n",
-+				sid, hit, hit >= 0 ? "MATCHED" : "NO MATCH (USFCFG decide)");
++				sid, hit, hit >= 0 ? "MATCHED" : "NO MATCH (USFCFG decides)");
 +		}
 +	}
  }

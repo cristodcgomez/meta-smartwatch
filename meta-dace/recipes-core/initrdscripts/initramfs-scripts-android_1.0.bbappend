@@ -20,18 +20,18 @@ do_install:append:dace() {
     # modprobe loop loads the shim module.
     install -m 0644 -D ${UNPACKDIR}/google-extcon-usb-shim.conf ${D}/etc/modprobe.d/google-extcon-usb-shim.conf
 
-    # dace-syncfs: fuerza el checkpoint de F2FS (syncfs) sobre /sdcard. Necesario
-    # porque busybox sync NO hace checkpoint y un 'reboot -f' desde el initramfs
-    # deja el F2FS sucio -> recovery -> los ficheros recien escritos (p.ej.
-    # /sdcard/dace-mode) revierten. Uso:  dace-syncfs
+    # dace-syncfs: forces the F2FS checkpoint (syncfs) on /sdcard. Needed
+    # because busybox sync does NOT checkpoint and a 'reboot -f' from the
+    # initramfs leaves F2FS dirty -> recovery -> the freshly written files (e.g.
+    # /sdcard/dace-mode) are reverted. Usage:  dace-syncfs
     install -m 0755 -D ${UNPACKDIR}/dace-syncfs ${D}/usr/bin/dace-syncfs
 }
 
 FILES:${PN}:append:dace = " /etc/modules.load.dace /etc/modprobe.d/google-extcon-usb-shim.conf /usr/bin/dace-syncfs"
 
-# dace-syncfs es un ELF ARM estatico (syscall syncfs) prebuilt: el split de
-# debug de do_package deja /usr/bin/.debug/dace-syncfs, y como esta receta solo
-# tiene ${PN} (PACKAGES="${PN}", sin -dbg) salta el QA installed-vs-shipped.
-# En el initramfs no queremos simbolos ni strip.
+# dace-syncfs is a prebuilt static ARM ELF (syncfs syscall): do_package's debug
+# split leaves /usr/bin/.debug/dace-syncfs, and since this recipe only has ${PN}
+# (PACKAGES="${PN}", no -dbg) the installed-vs-shipped QA fires. In the initramfs
+# we do not want symbols or strip.
 INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
 INHIBIT_PACKAGE_STRIP = "1"

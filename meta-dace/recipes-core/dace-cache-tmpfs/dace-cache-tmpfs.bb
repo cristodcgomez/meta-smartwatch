@@ -1,6 +1,7 @@
-SUMMARY = "dace: /home/ceres/.cache en tmpfs (el cache de shaders de Qt)"
-DESCRIPTION = "Sin esto, un rootfs lleno rompe el render de Qt y el compositor \
-arranca con la pantalla negra (ver AGENTS §15)."
+# AI Assisted:
+SUMMARY = "dace: /home/ceres/.cache on tmpfs (the Qt shader cache)"
+DESCRIPTION = "Without this, a full rootfs breaks Qt rendering and the compositor \
+starts with a black screen."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 COMPATIBLE_MACHINE = "dace"
